@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import AppRoutes from "./router";
+import 'leaflet/dist/leaflet.css';
+
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(() => {
