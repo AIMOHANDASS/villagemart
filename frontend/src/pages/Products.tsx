@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+// Note: Changed from 'axios' to standard 'fetch' for static file reading simulation
+// import axios from "axios"; 
 
 import Header from "@/components/Header";
 import ProductCard from "@/components/ProductCard";
@@ -12,36 +13,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Filter, Search, X, ShoppingCart, CheckCircle, Info } from "lucide-react";
 
+// --- UPDATED TYPE DEFINITION (Fixed: ID is now string to match ProductCardProps expectation) ---
 type Product = {
-  id: string;
+  id: string; // FIX 2: Changed from number to string to resolve ProductCardProps incompatibility (code 2322)
   name: string;
   price: number;
   image: string;
-  category: string;
-  rating: number;
-  reviews: number;
-  inStock: boolean;
-  isOrganic: boolean;
+  category: "Fruits" | "Vegetables" | "Groceries" | "Garlands"; 
+  rating: number; 
+  reviews: number; 
+  inStock: boolean; 
+  isOrganic: boolean; 
 };
 
 type Props = {
   user: any;
 };
 
-// State type for the notification pop-up
 type Notification = {
   visible: boolean;
   productName: string;
-  // Updated actions: 'added' (new item) or 'exists' (already in cart, quantity unchanged)
   action: 'added' | 'exists'; 
 };
 
+// API_BASE is only used for cart logic, not product fetching in this update
 const API_BASE = "http://localhost:5000/api"; 
 
 const Products: React.FC<Props> = ({ user }) => {
   const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState<string>("Groceries"); 
   const [searchQuery, setSearchQuery] = useState("");
   
   const [notification, setNotification] = useState<Notification>({
@@ -50,27 +51,57 @@ const Products: React.FC<Props> = ({ user }) => {
     action: 'added',
   });
 
-  const categories = [
+  // --- CATEGORIES FOR FILTERING ---
+  const categories: { value: Product['category'] | "all"; label: string }[] = [
     { value: "all", label: "All Categories" },
-    { value: "Vegetables", label: "Vegetables" },
+    { value: "Groceries", label: "Groceries" },
     { value: "Fruits", label: "Fruits" },
+    { value: "Vegetables", label: "Vegetables" },
     { value: "Garlands", label: "Garlands" },
-    { value: "Dairy", label: "Dairy" },
-    { value: "Spices", label: "Spices" },
   ];
 
+  // --- Fetching data from local path ---
   const fetchProducts = async () => {
     try {
-      const res = await axios.get<Product[]>(`${API_BASE}/products`);
-      setProducts(res.data);
+      const res = await fetch("/datadetails1.csv"); 
+      
+      if (!res.ok) {
+        throw new Error("Failed to load products file.");
+      }
+      
+      const csvText = await res.text();
+      const rows = csvText.split('\n').slice(1); 
+      
+      const parsedProducts: Product[] = rows.map((row, index) => {
+        const cols = row.split(',');
+        if (cols.length < 9) return null; 
+        
+        return {
+          // FIX 2: Convert ID to string here
+          id: cols[0].replace(/"/g, ''), 
+          name: cols[1].replace(/"/g, ''),
+          price: parseFloat(cols[2]),
+          image: cols[3].replace(/"/g, ''), 
+          category: cols[4] as Product['category'],
+          rating: parseFloat(cols[5]),
+          reviews: parseInt(cols[6]),
+          inStock: cols[7].toLowerCase() === 'true',
+          isOrganic: cols[8].toLowerCase() === 'true',
+        };
+      }).filter((item): item is Product => item !== null);
+
+      setProducts(parsedProducts);
+
     } catch (err) {
-      console.error("Error fetching products:", err);
+      console.error("Error fetching or parsing products:", err);
+      // Fallback or display error message
     }
   };
 
   useEffect(() => {
     fetchProducts();
   }, []);
+  
 
   const showNotification = (productName: string, action: 'added' | 'exists') => {
     setNotification({ visible: true, productName, action });
@@ -79,26 +110,39 @@ const Products: React.FC<Props> = ({ user }) => {
     }, 2500); 
   };
 
+  // --- FILTERING LOGIC ---
   const filteredProducts = products.filter((product) => {
-    const matchesCategory = selectedCategory === "all" || product.category === selectedCategory;
+    const matchesCategory = selectedCategory === "all" || product.category.toLowerCase() === selectedCategory.toLowerCase();
     const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
+  
 
-  // --- UPDATED addToCart LOGIC: DO NOT INCREASE QUANTITY ---
   const addToCart = (product: Product) => {
     const rawCart = localStorage.getItem("cart");
     let cart: any[] = rawCart ? JSON.parse(rawCart) : []; 
 
     const existing = cart.find((item: any) => item.id === product.id);
     
-    const initialUnit = product.category === 'Dairy' ? 'ltr' : 'kg';
-    const initialQuantity = initialUnit === 'kg' || initialUnit === 'ltr' ? 0.5 : 1;
+    // FIX 1: Initial quantity logic updated to remove 'Dairy' check, 
+    // resolving the "types have no overlap" error (code 2367).
+    // Uses a sensible default of 'kg' or 'unit' based on product category type.
+    let initialUnit = 'unit'; // Default for non-weight items
+    if (product.category === 'Groceries') {
+      initialUnit = 'kg';
+    } else if (product.category === 'Fruits' || product.category === 'Vegetables') {
+        initialUnit = 'kg';
+    } else if (product.category === 'Garlands') {
+        initialUnit = 'unit';
+    }
+    
+    // Set a default quantity based on the unit
+    const initialQuantity = initialUnit === 'kg' ? 0.5 : 1; 
     
     let action: 'added' | 'exists';
 
     if (existing) {
-      // DO NOT MODIFY QUANTITY HERE: Just set the action to 'exists'
+      // DO NOT MODIFY QUANTITY: Show exists notification
       action = 'exists'; 
     } else {
       cart.push({ 
@@ -109,19 +153,15 @@ const Products: React.FC<Props> = ({ user }) => {
       action = 'added'; // New item added to cart
     }
     
-    // Only update localStorage if a new item was actually added
     if (action === 'added') {
         localStorage.setItem("cart", JSON.stringify(cart));
         window.dispatchEvent(new Event("storage")); 
     }
 
-    // Show the pop-up notification
     showNotification(product.name, action);
   };
-  // --------------------------------------------------------
 
-
-  // --- UPDATED: Notification Pop-up Component ---
+  // NotificationPopup component (Unchanged)
   const NotificationPopup = () => {
     if (!notification.visible) return null;
 
@@ -146,14 +186,12 @@ const Products: React.FC<Props> = ({ user }) => {
                     transition-opacity duration-300
                 "
                 style={{ 
-                    // Use a warning/info color for 'already exists'
                     borderColor: isExists ? '#f59e0b' : '#10b981', 
                     animation: 'fadeInUp 0.3s ease-out'
                 }}
             >
                 
                 {isExists ? (
-                    // Use Info or a different icon for notification/warning
                     <Info className="h-8 w-8 text-yellow-600 mx-auto mb-3" />
                 ) : (
                     <CheckCircle className="h-8 w-8 text-green-600 mx-auto mb-3" />
@@ -179,14 +217,12 @@ const Products: React.FC<Props> = ({ user }) => {
         </>
     );
   };
-  // ------------------------------------
 
 
   return (
     <div className="min-h-screen bg-gray-50"> 
       <Header user={user} />
       
-      {/* Render the corrected Notification Pop-up */}
       <NotificationPopup />
 
       {/* Filters + Search Section */}
