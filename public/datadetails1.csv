@@ -1,0 +1,41 @@
+id,name,price,image,category,rating,reviews,inStock,isOrganic
+1,Ghee,21,https://keralaayurveda.biz/cdn/shop/articles/unnamed_53d6b8aa-8a09-448f-9fea-6e04472a3689.jpg?v=1752079400&width=700,Groceries,4.5,100,TRUE,FALSE
+2,Urad Dal (Black Gram Dal),84,https://cdn.shopify.com/s/files/1/0627/8266/8969/files/Chana_Dal_480x480.webp?v=1705988578,Groceries,4.5,100,TRUE,FALSE
+3,Raw Rice,105,https://www.aramiyarkai.com/admin/images/blog/ponni-raw_BID53.webp,Groceries,4.5,100,TRUE,FALSE
+4,Sugar,53,https://i0.wp.com/vrmshoppe.com/wp-content/uploads/2021/05/white-sugar-500x500-1.jpg?fit=500%2C500&ssl=1,Groceries,4.5,100,TRUE,FALSE
+5,Toor Dal (Split Pigeon Pea),102,https://www.gosupps.com/media/catalog/product/8/1/81_x81KEFLL.jpg,Groceries,4.5,100,TRUE,FALSE
+6,Fenugreek,110,https://organicbazar.net/cdn/shop/products/Untitled-design-2022-06-02T160309.044.jpg?v=1756540403&width=1946,Groceries,4.5,100,TRUE,FALSE
+7,Mustard Seeds (Small),111,https://cdn.shopaccino.com/edible-smart/products/mustard-seeds-1579770498-5266794-271964_l.jpg?v=611?param=1,Groceries,4.5,100,TRUE,FALSE
+8,Black Pepper,110,https://img500.exportersindia.com/product_images/bc-500/2024/8/13659881/black-pepper-powder-1722486404-7545723.jpeg,Groceries,4.5,100,TRUE,FALSE
+9,White Pepper,54.5,https://www.ebaza.com.my/image/ebaza/image/cache/data/jW0t2zhy1696906966-748x498.jpg,Groceries,4.5,100,TRUE,FALSE
+10,Coriander Seeds,54.5,https://vibrantliving.in/cdn/shop/files/CorianderSeeds.png?v=1731059976&width=800,Groceries,4.5,100,TRUE,FALSE
+11,Turmeric Powder,54.5,http://content.health.harvard.edu/wp-content/uploads/2024/03/fa246ce0-054b-4892-bf30-5eb43cd938aa.jpg,Groceries,4.5,100,TRUE,FALSE
+12,Oil,210,https://5.imimg.com/data5/SELLER/Default/2023/7/327751453/BQ/UF/YZ/112155041/5-l-gold-winner-refined-sunflower-oil-1000x1000.jpeg,Groceries,4.5,100,TRUE,FALSE
+13,Coconut Oil,110,https://naturesbox.in/cdn/shop/products/Coconut-Oil-back_82eb07f5-397e-4302-9d27-18d9676f1fd9_540x.jpg?v=1673614342,Groceries,4.5,100,TRUE,FALSE
+14,Coffee Powder,62,https://m.media-amazon.com/images/I/71mdCt8pa-L._SL1500_.jpg,Groceries,4.5,100,TRUE,FALSE
+15,Garlic,85.5,"https://static.toiimg.com/thumb/msid-123456524,imgsize-1412912,width-400,resizemode-4/1.jpg",Groceries,4.5,100,TRUE,FALSE
+16,Green Gram,87,https://pureandsure.in/cdn/shop/files/Green-gram-Whole-A.jpg?v=1727180752&width=700,Groceries,4.5,100,TRUE,FALSE
+17,Jaggery,22,https://orgfarm.store/cdn/shop/files/round-jaggery-500x500.jpg?v=1722456844&width=1500,Groceries,4.5,100,TRUE,FALSE
+18,Spices/Aromatics,112,https://www.alimentarium.org/sites/default/files/media/image/2016-10/shutterstock_mythja_epices_306621401_WEB_0.jpg,Groceries,4.5,100,TRUE,FALSE
+19,Asafoetida,36,https://m.media-amazon.com/images/I/71fwjIm8IsL._SL1280_.jpg,Groceries,4.5,100,TRUE,FALSE
+20,Cumin Seeds (Salt Sugar),26,https://as1.ftcdn.net/jpg/14/84/99/32/1000_F_1484993253_JtMMGDnOkoDgp7SBEHAtpJ80ohCEtNaC.webp,Groceries,4.5,100,TRUE,FALSE
+21,Chilli Powder,111,https://5.imimg.com/data5/SELLER/Default/2025/5/507905901/KM/OX/RS/100298487/chilly-powder-1000x1000.jpg,Groceries,4.5,100,TRUE,FALSE
+22,Coriander Powder,110,https://www.terraearthfood.com/cdn/shop/products/TerraCorianderPowder_1_1024x1024.jpg?v=1626012510,Groceries,4.5,100,TRUE,FALSE
+23,Groundnut Oil,130,https://www.tatasimplybetter.com/cdn/shop/files/01_1_2048x2048.png?v=1723024614,Groceries,4.5,100,TRUE,FALSE
+24,Ginger Garlic Paste,78,https://cdn3.foodviva.com/static-content/food-images/cooking-basics/ginger-garlic-paste/ginger-garlic-paste.jpg,Groceries,4.5,100,TRUE,FALSE
+25,Dried Chillies,128,https://vaaradhifarms.com/cdn/shop/files/5DryChilly.png?v=1730907059&width=1080,Groceries,4.5,100,TRUE,FALSE
+26,Groundnuts,74,https://m.media-amazon.com/images/I/41RoBZdJ+iL._SY300_SX300_QL70_FMwebp_.jpg,Groceries,4.5,100,TRUE,FALSE
+27,Wheat Flour,182,https://img500.exportersindia.com/product_images/bc-500/dir_174/5198785/wheat-flour-1508737546-3410055.jpeg,Groceries,4.5,100,TRUE,FALSE
+28,Onion,85,https://produits.bienmanger.com/36700-0w470h470_Organic_Red_Onion_From_Italy.jpg,Vegetables,4.5,100,TRUE,TRUE
+29,Beans,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/beans__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+30,Cabbages,40,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/cabbages-v2__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+31,Broccoli,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/broccoli__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+32,Capsicums ,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/capsicums__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+33,Beetroot,60,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/beetroot__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+34,Cauliflower,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/cauliflower__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+35,Ginger,20,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/ginger__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+36,Okra,40,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/okra__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+37,Potatoes,40,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/Potatoes-v2__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+38,Pumpkins,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/pumpkins__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+39,Sweet corn,60,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/sweet-corn__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+40,Tomatoes,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/tomato__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
