@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_BASE } from "../api";
+import { API_BASE_URL } from "../api";
 
 export default function Signup({ onLogin }: { onLogin: (u: any) => void }) {
   const [formData, setFormData] = useState({
@@ -25,7 +25,7 @@ export default function Signup({ onLogin }: { onLogin: (u: any) => void }) {
     e.preventDefault();
 
     try {
-      const res = await fetch(`${API_BASE}/users/signup`, {
+      const res = await fetch(`${API_BASE_URL}/users/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),

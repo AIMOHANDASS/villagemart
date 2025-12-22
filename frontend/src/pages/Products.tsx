@@ -36,8 +36,8 @@ type Notification = {
   action: 'added' | 'exists'; 
 };
 
-// API_BASE is only used for cart logic, not product fetching in this update
-const API_BASE = "http://localhost:5000/api"; 
+// API_BASE_URL is only used for cart logic, not product fetching in this update
+const API_BASE_URL = "http://localhost:5000/api"; 
 
 const Products: React.FC<Props> = ({ user }) => {
   const navigate = useNavigate();

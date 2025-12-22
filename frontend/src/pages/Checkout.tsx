@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Edit, Check, CheckCircle, Smartphone, DollarSign, Wallet } from "lucide-react";
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 // --- UPDATED: Admin UPI IDs based on user input ---
 const ADMIN_UPI_DETAILS: { [key: string]: { id: string; name: string } } = {
@@ -129,7 +129,7 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
             paymentStatus: paymentMethod === 'cod' ? 'Pending' : 'Confirmed',
         };
 
-        const res = await fetch(`${API_BASE}/orders`, {
+        const res = await fetch(`${API_BASE_URL}/orders`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(order),

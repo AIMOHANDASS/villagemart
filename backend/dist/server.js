@@ -46,7 +46,7 @@ const cors_1 = __importDefault(require("cors"));
 const product_routes_1 = __importDefault(require("./routes/product.routes"));
 const order_routes_1 = __importDefault(require("./routes/order.routes"));
 const admin_routes_1 = __importDefault(require("./routes/admin.routes"));
-const user_routes_1 = __importDefault(require("./routes/user.routes")); // Added users route
+const user_routes_1 = __importDefault(require("./routes/user.routes"));
 // ✅ Load environment variables
 dotenv.config({ path: path_1.default.resolve(__dirname, "../.env") });
 const app = (0, express_1.default)();
@@ -57,21 +57,23 @@ app.use(express_1.default.json());
 app.use("/api/products", product_routes_1.default);
 app.use("/api/orders", order_routes_1.default);
 app.use("/api/admin", admin_routes_1.default);
-app.use("/api/users", user_routes_1.default); // Added users route
+app.use("/api/users", user_routes_1.default);
 // ✅ Check for MONGO_URI
 if (!process.env.MONGO_URI) {
     console.error("❌ MONGO_URI missing in .env file");
     process.exit(1);
 }
 const MONGO_URI = process.env.MONGO_URI;
-const PORT = process.env.PORT || 5000;
+// ✅ FIX 1: PORT must be a NUMBER (TypeScript fix)
+const PORT = Number(process.env.PORT) || 5000;
 // ✅ Connect to MongoDB and start server
 mongoose_1.default
     .connect(MONGO_URI)
     .then(() => {
     console.log("✅ MongoDB connected successfully");
-    app.listen(PORT, () => {
-        console.log(`🚀 Server running at http://localhost:${PORT}`);
+    // ✅ FIX 2: Bind to 0.0.0.0 (Laptop acts as server)
+    app.listen(PORT, "0.0.0.0", () => {
+        console.log(`🚀 Server running on port ${PORT}`);
     });
 })
     .catch((err) => {

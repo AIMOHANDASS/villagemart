@@ -39,3 +39,29 @@ id,name,price,image,category,rating,reviews,inStock,isOrganic
 38,Pumpkins,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/pumpkins__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
 39,Sweet corn,60,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/sweet-corn__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
 40,Tomatoes,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/tomato__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+41,Banana,30,https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D,Fruits,4,100,TRUE,TRUE
+42,Pinapple,50,https://images.unsplash.com/photo-1550258987-190a2d41a8ba?q=80&w=687&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D,Fruits,4,100,TRUE,TRUE
+43,Apple,80,https://i.pinimg.com/736x/50/6b/4e/506b4ed1f20085d68b8b4f403bb110d4.jpg,Fruits,4,100,TRUE,TRUE
+44,Grapes,70,https://i.pinimg.com/736x/93/90/e6/9390e6cd144f89705ab95dcb0c60fb41.jpg,Fruits,4,100,TRUE,TRUE
+45,Pomegranate,70,https://i.pinimg.com/736x/f6/a9/68/f6a968adcd154632a6d2d97ba1404ae4.jpg,Fruits,4,100,TRUE,TRUE
+46,guava,70,https://i.pinimg.com/736x/ce/7e/9d/ce7e9db3393c4327111b05ac07dabee6.jpg,Fruits,4,100,TRUE,TRUE
+47,Mango,70,https://i.pinimg.com/736x/ab/64/1c/ab641caad9dce65ab2dda9f4171b0f63.jpg,Fruits,4,100,TRUE,TRUE
+48,Orange,80,https://i.pinimg.com/1200x/8d/cf/e2/8dcfe2a785ba01c4b3995ac18005402d.jpg,Fruits,4,100,TRUE,TRUE
+49,Watermelon,50,https://i.pinimg.com/736x/bd/25/07/bd2507eef8fda01f9fb7544a10861509.jpg,Fruits,4,100,TRUE,TRUE
+50,Dragon Fruit,60,https://i.pinimg.com/736x/33/cd/64/33cd6497e99dcfebb84a6271644de7de.jpg,Fruits,4,100,TRUE,TRUE
+51,Chikoo,60,https://i.pinimg.com/1200x/30/51/c6/3051c6a20513d06e95618d2f0f672de4.jpg,Fruits,4,100,TRUE,TRUE
+52,sitaphal,60,https://i.pinimg.com/736x/79/c3/71/79c3714c888377a0a18d02c854335e8a.jpg,Fruits,4,100,TRUE,TRUE
+53,Rambutan,80,https://i.pinimg.com/736x/ef/84/e4/ef84e40ce87d22d8472942c002bf1f44.jpg,Fruits,4,100,TRUE,TRUE
+54,Lotus,4000,https://i.pinimg.com/736x/35/39/d0/3539d08287a4eaa38f422738ae588e65.jpg,Garlands,4,100,TRUE,TRUE
+55,Rose,5000,https://i.pinimg.com/736x/5d/55/8f/5d558f9136c5e02d828725ac4d4124d1.jpg,Garlands,4,100,TRUE,TRUE
+56,Rose Pedals,6000,https://i.pinimg.com/736x/14/42/8c/14428c75b6436f1943ecd5aec96f9c1d.jpg,Garlands,4,100,TRUE,TRUE
+57,Lotus&Nanthiyavattai,5000,https://i.pinimg.com/736x/c1/fb/b5/c1fbb543e0c12a11bbdb8436252541ed.jpg,Garlands,4,100,TRUE,TRUE
+58,Pedals&Jamangi,5000,https://i.pinimg.com/736x/d8/23/3b/d8233b11818cf0d483d53fe591921f62.jpg,Garlands,4,100,TRUE,TRUE
+59,Nanthiyavattai dot type,6000,https://i.pinimg.com/1200x/aa/02/3a/aa023a2cbee4798f264bb2730891b57d.jpg,Garlands,4,100,TRUE,TRUE
+60,Nanthiyavattai role type,5000,https://i.pinimg.com/736x/ff/44/e3/ff44e389d5f5ce146a6b4c4ba2616a7e.jpg,Garlands,4,100,TRUE,TRUE
+61,Pedals role type,6000,https://i.pinimg.com/736x/3a/c2/a7/3ac2a7de308951264210e3a18a380951.jpg,Garlands,4,100,TRUE,TRUE
+62,Nanthiyavattai & Pedals,5000,https://i.pinimg.com/1200x/e0/c2/4e/e0c24ec51e72f4f97bac88ad22c4a640.jpg,Garlands,4,100,TRUE,TRUE
+63,Jamangi,4000,https://i.pinimg.com/736x/86/38/7e/86387eb05ed5e60821ffe4c266150c0c.jpg,Garlands,4,100,TRUE,TRUE
+64,Jamangi & Pedals,5000,https://i.pinimg.com/1200x/19/06/e1/1906e1fa7919d89f4009d58adce28f3b.jpg,Garlands,4,100,TRUE,TRUE
+65,Nanthiyavattai,5000,https://i.pinimg.com/1200x/40/31/0f/40310f609c1fda153517e6ee0bc9b490.jpg,Garlands,4,100,TRUE,TRUE
+66,Pedals with valai type,6000,https://i.pinimg.com/736x/82/30/1c/82301c11d147a996dd8dc5b1b106a040.jpg,Garlands,4,100,TRUE,TRUE

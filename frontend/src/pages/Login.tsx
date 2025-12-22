@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_BASE } from "../api";
+import { API_BASE_URL } from "../api";
 
 type Props = { onLogin: (u: any) => void };
 
@@ -24,7 +24,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/users/login`, {
+      const res = await fetch(`${API_BASE_URL}/users/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),

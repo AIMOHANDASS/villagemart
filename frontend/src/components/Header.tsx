@@ -9,14 +9,14 @@ import { Link, useNavigate } from "react-router-dom";
 type Props = { user?: any };
 
 // Placeholder for your API base URL (adjust as needed)
-const API_BASE = "http://localhost:5000/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 // --- CONCEPTUAL LOGIN SIMULATION ---
 // In a real application, this logic would run right after a successful API login call.
 const fetchAndLoadUserCart = async (userId: string, userToken: string) => {
     try {
         // 1. Fetch the user's previously saved cart from the server
-        const res = await fetch(`${API_BASE}/users/${userId}/cart`, {
+        const res = await fetch(`${API_BASE_URL}/users/${userId}/cart`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -83,7 +83,7 @@ const Header: React.FC<Props> = ({ user }) => {
             try {
                 // 2. SIMULATE: Save the current local cart to the server tied to the user's ID
                 console.log(`Saving cart for user ${user.id} before logout...`);
-                await fetch(`${API_BASE}/users/${user.id}/cart`, {
+                await fetch(`${API_BASE_URL}/users/${user.id}/cart`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: currentLocalCart, 

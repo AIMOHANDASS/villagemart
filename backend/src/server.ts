@@ -9,7 +9,7 @@ import cors from "cors";
 import productRoutes from "./routes/product.routes";
 import orderRoutes from "./routes/order.routes";
 import adminRoutes from "./routes/admin.routes";
-import userRoutes from "./routes/user.routes"; // Added users route
+import userRoutes from "./routes/user.routes";
 
 // ✅ Load environment variables
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -24,7 +24,7 @@ app.use(express.json());
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
-app.use("/api/users", userRoutes); // Added users route
+app.use("/api/users", userRoutes);
 
 // ✅ Check for MONGO_URI
 if (!process.env.MONGO_URI) {
@@ -33,18 +33,23 @@ if (!process.env.MONGO_URI) {
 }
 
 const MONGO_URI: string = process.env.MONGO_URI;
-const PORT: number | string = process.env.PORT || 5000;
+
+// ✅ FIX 1: PORT must be a NUMBER (TypeScript fix)
+const PORT: number = Number(process.env.PORT) || 5000;
 
 // ✅ Connect to MongoDB and start server
 mongoose
   .connect(MONGO_URI)
   .then(() => {
     console.log("✅ MongoDB connected successfully");
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running at http://localhost:${PORT}`);
+
+    // ✅ FIX 2: Bind to 0.0.0.0 (Laptop acts as server)
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
     });
   })
   .catch((err) => {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
   });
+  
