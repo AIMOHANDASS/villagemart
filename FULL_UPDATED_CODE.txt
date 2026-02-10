@@ -1,0 +1,2226 @@
+===== backend/src/controllers/order.controller.ts =====
+import { Request, Response } from "express";
+import db from "../db";
+import { sendOrderConfirmMail } from "../utils/mailer";
+import nodemailer from "nodemailer";
+
+type GarlandScheduleRow = {
+  order_id: number;
+  delivery_at: string;
+  reminder_sent: number;
+  last_reminder_at: string | null;
+};
+
+/* ======================================================
+   📧 EMAIL TRANSPORT (Admin Alert)
+====================================================== */
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+/* ======================================================
+   🗂 GARLAND PREORDER META TABLE
+====================================================== */
+db.query(
+  `
+    CREATE TABLE IF NOT EXISTS garland_order_schedule (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      order_id INT NOT NULL,
+      delivery_at DATETIME NOT NULL,
+      reminder_sent TINYINT(1) NOT NULL DEFAULT 0,
+      last_reminder_at DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_garland_order_id (order_id),
+      INDEX idx_garland_delivery_at (delivery_at)
+    )
+  `,
+  (err) => {
+    if (err) {
+      console.error("❌ Could not ensure garland_order_schedule table:", err);
+    }
+  }
+);
+
+/* ======================================================
+   🔁 HELPER - UPDATE ORDER STATUS
+====================================================== */
+const updateStatus = (
+  orderId: number,
+  status: string,
+  tracking: string,
+  timeField?: string
+) => {
+  let sql = `UPDATE orders SET status=?, tracking_status=?`;
+  const params: any[] = [status, tracking];
+
+  if (timeField) {
+    sql += `, ${timeField}=NOW()`;
+  }
+
+  sql += ` WHERE id=?`;
+  params.push(orderId);
+
+  db.query(sql, params, (err) => {
+    if (err) {
+      console.error("❌ updateStatus error:", err);
+    }
+  });
+};
+
+const normalizeStatus = (value?: string) => (value || "").toUpperCase();
+
+const isGarlandItem = (item: any) => {
+  const category = String(item?.category || "").toLowerCase();
+  const name = String(item?.product_name || "").toLowerCase();
+  return category === "garlands" || name.includes("garland");
+};
+
+const getValidDeliveryDate = (value: any) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const isAtLeast24HoursAhead = (date: Date) => {
+  const diffHours = (date.getTime() - Date.now()) / (1000 * 60 * 60);
+  return diffHours >= 24;
+};
+
+const getCurrentOrderStatus = (
+  orderId: number,
+  cb: (err: any, status?: string, userId?: number) => void
+) => {
+  db.query(
+    "SELECT tracking_status, user_id FROM orders WHERE id=? LIMIT 1",
+    [orderId],
+    (err: any, rows: any[]) => {
+      if (err) return cb(err);
+      if (!rows || rows.length === 0) return cb(new Error("Order not found"));
+      cb(null, normalizeStatus(rows[0].tracking_status), Number(rows[0].user_id));
+    }
+  );
+};
+
+const mapOrders = (rows: any[]) => {
+  const map = new Map<number, any>();
+
+  rows.forEach((row) => {
+    if (!map.has(row.orderId)) {
+      map.set(row.orderId, {
+        orderId: row.orderId,
+        username: row.username,
+        email: row.email,
+        total_amount: Number(row.total_amount),
+        delivery_fee: Number(row.delivery_fee),
+        status: row.status,
+        tracking_status: row.tracking_status,
+        cancel_reason: row.cancel_reason,
+        created_at: row.created_at,
+        picked_at: row.picked_at,
+        out_for_delivery_at: row.out_for_delivery_at,
+        delivered_at: row.delivered_at,
+        garland_delivery_at: row.garland_delivery_at,
+        garland_reminder_sent: Number(row.garland_reminder_sent || 0),
+        garland_last_reminder_at: row.garland_last_reminder_at,
+        items: [],
+      });
+    }
+
+    if (row.item_id) {
+      map.get(row.orderId).items.push({
+        product_name: row.product_name,
+        unit_price: Number(row.unit_price),
+        weight: Number(row.weight),
+        total_price: Number(row.total_price),
+        image: row.image,
+      });
+    }
+  });
+
+  return [...map.values()];
+};
+
+const orderQuery = `
+  SELECT 
+    o.id AS orderId,
+    u.username,
+    u.email,
+    o.total_amount,
+    o.delivery_fee,
+    o.status,
+    o.tracking_status,
+    o.cancel_reason,
+    o.created_at,
+    o.picked_at,
+    o.out_for_delivery_at,
+    o.delivered_at,
+
+    oi.id AS item_id,
+    oi.product_name,
+    oi.unit_price,
+    oi.weight,
+    oi.total_price,
+    oi.image,
+
+    gs.garland_delivery_at,
+    gs.garland_reminder_sent,
+    gs.garland_last_reminder_at
+
+  FROM orders o
+  JOIN users u ON u.id = o.user_id
+  LEFT JOIN order_items oi ON oi.order_id = o.id
+  LEFT JOIN (
+    SELECT
+      order_id,
+      MIN(delivery_at) AS garland_delivery_at,
+      MAX(reminder_sent) AS garland_reminder_sent,
+      MAX(last_reminder_at) AS garland_last_reminder_at
+    FROM garland_order_schedule
+    GROUP BY order_id
+  ) gs ON gs.order_id = o.id
+`;
+
+/* ======================================================
+   🛒 CREATE ORDER
+====================================================== */
+export const createOrder = (req: Request, res: Response) => {
+  const { userId, items, address, phone, paymentMethod } = req.body;
+
+  if (!userId || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "❌ Invalid order data" });
+  }
+
+  const garlandItems = items.filter((item: any) => isGarlandItem(item));
+
+  for (const garlandItem of garlandItems) {
+    const deliveryDate = getValidDeliveryDate(
+      garlandItem.deliveryDate || garlandItem.delivery_at
+    );
+
+    if (!deliveryDate) {
+      return res.status(400).json({
+        message: "Garland orders require a valid delivery date & time",
+      });
+    }
+
+    if (!isAtLeast24HoursAhead(deliveryDate)) {
+      return res.status(400).json({
+        message:
+          "Garland orders must be placed at least 24 hours in advance",
+      });
+    }
+  }
+
+  const subtotal = items.reduce(
+    (sum: number, i: any) => sum + Number(i.total_price || 0),
+    0
+  );
+
+  const deliveryFee = subtotal >= 500 ? 0 : 5;
+  const grandTotal = subtotal + deliveryFee;
+
+  const orderSql = `
+    INSERT INTO orders 
+    (user_id, total_amount, delivery_fee, status, tracking_status, address, phone, payment_method)
+    VALUES (?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?)
+  `;
+
+  db.query(
+    orderSql,
+    [
+      Number(userId),
+      grandTotal,
+      deliveryFee,
+      address || "",
+      phone || "",
+      paymentMethod || "cod",
+    ],
+    (err: any, result: any) => {
+      if (err) {
+        console.error("❌ Create order error:", err);
+        return res.status(500).json({ message: "Order creation failed" });
+      }
+
+      const orderId = result.insertId;
+
+      const itemSql = `
+        INSERT INTO order_items
+        (order_id, product_id, product_name, unit_price, weight, total_price, image)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      items.forEach((item: any) => {
+        db.query(itemSql, [
+          orderId,
+          item.product_id,
+          item.product_name,
+          Number(item.unit_price),
+          Number(item.weight),
+          Number(item.total_price),
+          item.image || "",
+        ]);
+
+        if (isGarlandItem(item)) {
+          const deliveryDate = getValidDeliveryDate(
+            item.deliveryDate || item.delivery_at
+          );
+
+          if (deliveryDate) {
+            db.query(
+              `INSERT INTO garland_order_schedule (order_id, delivery_at)
+               VALUES (?, ?)`,
+              [orderId, deliveryDate]
+            );
+          }
+        }
+      });
+
+      res.json({ success: true, orderId });
+    }
+  );
+};
+
+/* ======================================================
+   📦 GET ALL ORDERS (ADMIN)
+====================================================== */
+export const getAllOrders = (req: Request, res: Response) => {
+  const sql = `${orderQuery} ORDER BY o.created_at DESC`;
+
+  db.query(sql, (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ Fetch orders error:", err);
+      return res.status(500).json([]);
+    }
+
+    res.json(mapOrders(rows));
+  });
+};
+
+/* ======================================================
+   🌸 GET GARLAND ORDERS (ADMIN)
+====================================================== */
+export const getGarlandOrders = (req: Request, res: Response) => {
+  const sql = `
+    ${orderQuery}
+    WHERE EXISTS (
+      SELECT 1 FROM garland_order_schedule gs2
+      WHERE gs2.order_id = o.id
+    )
+    OR EXISTS (
+      SELECT 1 FROM order_items og
+      WHERE og.order_id = o.id
+      AND LOWER(og.product_name) LIKE '%garland%'
+    )
+    ORDER BY o.created_at DESC
+  `;
+
+  db.query(sql, (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ Fetch garland orders error:", err);
+      return res.status(500).json([]);
+    }
+
+    res.json(mapOrders(rows));
+  });
+};
+
+/* ======================================================
+   ⏰ ADMIN SEND GARLAND REMINDER
+====================================================== */
+export const sendGarlandReminder = (req: Request, res: Response) => {
+  const orderId = Number(req.params.orderId);
+
+  if (!orderId) {
+    return res.status(400).json({ message: "Invalid order id" });
+  }
+
+  const sql = `
+    SELECT
+      o.id AS order_id,
+      o.user_id,
+      u.username,
+      u.email,
+      gs.delivery_at,
+      gs.reminder_sent,
+      gs.last_reminder_at
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+    JOIN garland_order_schedule gs ON gs.order_id = o.id
+    WHERE o.id = ?
+    ORDER BY gs.delivery_at ASC
+    LIMIT 1
+  `;
+
+  db.query(sql, [orderId], (err: any, rows: GarlandScheduleRow[] & any[]) => {
+    if (err) {
+      console.error("❌ Garland reminder lookup error:", err);
+      return res.status(500).json({ message: "Reminder failed" });
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ message: "Garland schedule not found" });
+    }
+
+    const row: any = rows[0];
+    const deliveryDate = new Date(row.delivery_at);
+
+    if (Number.isNaN(deliveryDate.getTime())) {
+      return res.status(400).json({ message: "Invalid schedule date" });
+    }
+
+    if (deliveryDate.getTime() <= Date.now()) {
+      return res.status(409).json({
+        message: "Scheduled garland date is already passed",
+      });
+    }
+
+    const message = `🌸 Reminder: Your garland order #${orderId} is scheduled for ${deliveryDate.toLocaleString("en-IN")}`;
+
+    db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+      row.user_id,
+      message,
+    ]);
+
+    const adminMail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+
+    Promise.all([
+      row.email
+        ? transporter.sendMail({
+            to: row.email,
+            subject: `Garland Order Reminder (#${orderId})`,
+            html: `<p>Hi ${row.username},</p><p>${message}</p>`,
+          })
+        : Promise.resolve(),
+      adminMail
+        ? transporter.sendMail({
+            to: adminMail,
+            subject: `Admin Copy: Garland Reminder Sent (#${orderId})`,
+            html: `<p>Reminder sent to user <b>${row.username}</b> for order <b>#${orderId}</b>.</p><p>Schedule: ${deliveryDate.toLocaleString("en-IN")}</p>`,
+          })
+        : Promise.resolve(),
+    ])
+      .catch((mailErr) => {
+        console.error("❌ Garland reminder mail error:", mailErr);
+      })
+      .finally(() => {
+        db.query(
+          `UPDATE garland_order_schedule
+           SET reminder_sent = 1, last_reminder_at = NOW()
+           WHERE order_id = ?`,
+          [orderId]
+        );
+
+        return res.json({ success: true, message: "Reminder sent" });
+      });
+  });
+};
+
+/* ======================================================
+   👤 GET USER ORDERS
+====================================================== */
+export const getUserOrders = (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  const sql = `
+    SELECT 
+      o.id AS orderId,
+      o.total_amount,
+      o.delivery_fee,
+      o.status,
+      o.tracking_status,
+      o.cancel_reason,
+      o.created_at,
+      o.picked_at,
+      o.out_for_delivery_at,
+      o.delivered_at,
+
+      oi.id AS item_id,
+      oi.product_name,
+      oi.unit_price,
+      oi.weight,
+      oi.total_price,
+      oi.image
+
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    WHERE o.user_id = ?
+    ORDER BY o.id DESC
+  `;
+
+  db.query(sql, [userId], (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ Fetch user orders error:", err);
+      return res.status(500).json([]);
+    }
+
+    const map = new Map<number, any>();
+
+    rows.forEach((row) => {
+      if (!map.has(row.orderId)) {
+        map.set(row.orderId, {
+          orderId: row.orderId,
+          total_amount: Number(row.total_amount),
+          delivery_fee: Number(row.delivery_fee),
+          status: row.status,
+          tracking_status: row.tracking_status,
+          cancel_reason: row.cancel_reason,
+          created_at: row.created_at,
+          picked_at: row.picked_at,
+          out_for_delivery_at: row.out_for_delivery_at,
+          delivered_at: row.delivered_at,
+          items: [],
+        });
+      }
+
+      if (row.item_id) {
+        map.get(row.orderId).items.push({
+          product_name: row.product_name,
+          unit_price: Number(row.unit_price),
+          weight: Number(row.weight),
+          total_price: Number(row.total_price),
+          image: row.image,
+        });
+      }
+    });
+
+    res.json([...map.values()]);
+  });
+};
+
+/* ======================================================
+   ✅ ADMIN CONFIRM ORDER
+====================================================== */
+export const confirmOrder = (req: Request, res: Response) => {
+  const orderId = Number(req.params.orderId);
+
+  if (!orderId) return res.status(400).json({ message: "Invalid order id" });
+
+  getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
+    if (statusErr) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (currentStatus !== "PENDING") {
+      return res.status(409).json({
+        message: `Order already processed (${currentStatus}). Confirm allowed only once from PENDING.`,
+      });
+    }
+
+    const sql = `
+      SELECT 
+        o.id,
+        o.user_id,
+        o.total_amount,
+        o.delivery_fee,
+        u.email,
+        u.username,
+
+        oi.id AS item_id,
+        oi.product_name,
+        oi.unit_price,
+        oi.weight,
+        oi.total_price,
+        oi.image
+
+      FROM orders o
+      JOIN users u ON u.id = o.user_id
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.id = ?
+    `;
+
+    db.query(sql, [orderId], async (err: any, rows: any[]) => {
+      if (err || rows.length === 0) {
+        console.error("❌ Confirm fetch error:", err);
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      const items = rows
+        .filter((r) => r.item_id)
+        .map((r) => ({
+          product_name: r.product_name,
+          unit_price: Number(r.unit_price),
+          weight: Number(r.weight),
+          total_price: Number(r.total_price),
+          image: r.image,
+        }));
+
+      const order = rows[0];
+
+      updateStatus(orderId, "CONFIRMED", "CONFIRMED");
+
+      db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+        order.user_id,
+        `✅ Order #${orderId} confirmed`,
+      ]);
+
+      try {
+        await sendOrderConfirmMail(
+          order.email,
+          order.username,
+          orderId,
+          Number(order.total_amount),
+          Number(order.delivery_fee || 0),
+          items
+        );
+
+        return res.json({ success: true });
+      } catch (mailErr) {
+        console.error("❌ Mail failed:", mailErr);
+        return res.status(500).json({ message: "Mail failed" });
+      }
+    });
+  });
+};
+
+/* ======================================================
+   🔄 ADMIN UPDATE STATUS
+====================================================== */
+export const updateOrderStatus = (req: Request, res: Response) => {
+  const orderId = Number(req.params.orderId);
+  const requestedStatus = normalizeStatus(req.body?.status);
+
+  if (!orderId || !requestedStatus) {
+    return res.status(400).json({ message: "Invalid data" });
+  }
+
+  const nextStatusMap: Record<string, string> = {
+    CONFIRMED: "PICKED",
+    PICKED: "OUT_FOR_DELIVERY",
+    OUT_FOR_DELIVERY: "DELIVERED",
+  };
+
+  getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
+    if (statusErr || !currentStatus) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const expectedNext = nextStatusMap[currentStatus];
+
+    if (!expectedNext) {
+      return res.status(409).json({
+        message: `Cannot update status from ${currentStatus}`,
+      });
+    }
+
+    if (requestedStatus !== expectedNext) {
+      return res.status(409).json({
+        message: `Invalid transition. Allowed next status is ${expectedNext}.`,
+      });
+    }
+
+    let timeField: string | undefined;
+    if (requestedStatus === "PICKED") timeField = "picked_at";
+    if (requestedStatus === "OUT_FOR_DELIVERY") timeField = "out_for_delivery_at";
+    if (requestedStatus === "DELIVERED") timeField = "delivered_at";
+
+    updateStatus(orderId, requestedStatus, requestedStatus, timeField);
+
+    db.query(
+      "INSERT INTO notifications (user_id,message) SELECT user_id, ? FROM orders WHERE id=?",
+      [`📦 Order #${orderId} updated → ${requestedStatus}`, orderId]
+    );
+
+    return res.json({ success: true });
+  });
+};
+
+/* ======================================================
+   ❌ ADMIN CANCEL ORDER
+====================================================== */
+export const adminCancelOrder = (req: Request, res: Response) => {
+  const orderId = Number(req.params.orderId);
+  const { reason } = req.body;
+
+  if (!orderId || !reason) {
+    return res.status(400).json({ message: "Invalid cancel request" });
+  }
+
+  getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
+    if (statusErr || !currentStatus) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (["CANCELLED", "DELIVERED"].includes(currentStatus)) {
+      return res.status(409).json({
+        message: `Order cannot be cancelled from ${currentStatus}`,
+      });
+    }
+
+    updateStatus(orderId, "CANCELLED", "CANCELLED");
+
+    db.query("UPDATE orders SET cancel_reason=? WHERE id=?", [reason, orderId]);
+
+    db.query(
+      "INSERT INTO notifications (user_id,message) SELECT user_id, ? FROM orders WHERE id=?",
+      [`❌ Order #${orderId} cancelled: ${reason}`, orderId]
+    );
+
+    return res.json({ success: true });
+  });
+};
+
+/* ======================================================
+   👤 USER CANCEL → ADMIN EMAIL ALERT
+====================================================== */
+export const userCancelOrder = (req: Request, res: Response) => {
+  const orderId = Number(req.params.orderId);
+  const { reason } = req.body;
+
+  if (!orderId || !reason) {
+    return res.status(400).json({ message: "Invalid cancel request" });
+  }
+
+  getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
+    if (statusErr || !currentStatus) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (["CANCELLED", "DELIVERED"].includes(currentStatus)) {
+      return res.status(409).json({
+        message: `Order cannot be cancelled from ${currentStatus}`,
+      });
+    }
+
+    updateStatus(orderId, "CANCELLED", "CANCELLED");
+
+    db.query("UPDATE orders SET cancel_reason=? WHERE id=?", [reason, orderId]);
+
+    const adminMessage = `⚠ User cancelled order #${orderId}. Reason: ${reason}`;
+
+    db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+      1,
+      adminMessage,
+    ]);
+
+    transporter.sendMail({
+      to: process.env.ADMIN_EMAIL || process.env.EMAIL_USER,
+      subject: `Order Cancelled (#${orderId})`,
+      html: `<p>${adminMessage}</p>`,
+    });
+
+    return res.json({ success: true });
+  });
+};
+
+===== frontend/src/pages/AdminPanel.tsx =====
+import React, { useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { API_BASE_URL } from "../api";
+
+interface OrderItem {
+  product_name: string;
+  unit_price: number;
+  weight: number;
+  total_price: number;
+  image: string;
+}
+
+interface Order {
+  orderId: number;
+  username: string;
+  total_amount: number;
+  status: string;
+  tracking_status?: string;
+  cancel_reason?: string;
+  created_at: string;
+  picked_at?: string;
+  out_for_delivery_at?: string;
+  delivered_at?: string;
+  garland_delivery_at?: string;
+  garland_reminder_sent?: number;
+  garland_last_reminder_at?: string;
+  items: OrderItem[];
+}
+
+interface TransportBooking {
+  id: number;
+  username: string;
+  customer_name: string;
+  customer_phone: string;
+  from_address: string;
+  to_address: string;
+  distance_km: number;
+  charge_amount: number;
+  status: string;
+  created_at: string;
+}
+
+interface PartyHallBooking {
+  id: number;
+  username: string;
+  customer_name: string;
+  customer_phone: string;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  person_count: number;
+  snacks_count: number;
+  water_count: number;
+  cake_count: number;
+  add_ons_json?: string;
+  total_charge: number;
+  status: string;
+  created_at: string;
+}
+
+const cancelReasons = [
+  "More orders",
+  "Distance unavailable",
+  "Product not available",
+  "Wrong location",
+];
+
+const getStatusColor = (status?: string) => {
+  const s = status?.toLowerCase();
+
+  switch (s) {
+    case "pending":
+      return "bg-yellow-100 text-yellow-800";
+    case "confirmed":
+      return "bg-green-100 text-green-800";
+    case "picked":
+      return "bg-blue-100 text-blue-800";
+    case "out_for_delivery":
+      return "bg-purple-100 text-purple-800";
+    case "delivered":
+      return "bg-emerald-100 text-emerald-800";
+    case "cancelled":
+      return "bg-red-100 text-red-800";
+    default:
+      return "bg-gray-100 text-gray-800";
+  }
+};
+
+const formatDate = (value?: string) => {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("en-IN");
+};
+
+const getCurrentStatus = (order: Order) =>
+  (order.tracking_status || order.status || "").toUpperCase();
+
+const getHoursLeft = (value?: string) => {
+  if (!value) return null;
+  const target = new Date(value).getTime();
+  if (Number.isNaN(target)) return null;
+  const hoursLeft = (target - Date.now()) / (1000 * 60 * 60);
+  return hoursLeft;
+};
+
+const AdminPanel: React.FC = () => {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [garlandOrders, setGarlandOrders] = useState<Order[]>([]);
+  const [transportBookings, setTransportBookings] = useState<TransportBooking[]>([]);
+  const [partyHallBookings, setPartyHallBookings] = useState<PartyHallBooking[]>([]);
+
+  const garlandOrderIds = useMemo(
+    () => new Set(garlandOrders.map((o) => o.orderId)),
+    [garlandOrders]
+  );
+
+  const nonGarlandOrders = useMemo(
+    () => orders.filter((o) => !garlandOrderIds.has(o.orderId)),
+    [orders, garlandOrderIds]
+  );
+
+  const [loading, setLoading] = useState(true);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [remindingId, setRemindingId] = useState<number | null>(null);
+
+  const fetchOrders = async () => {
+    try {
+      const [
+        allOrdersRes,
+        garlandOrdersRes,
+        transportRes,
+        partyHallRes,
+      ] = await Promise.all([
+        axios.get<Order[]>(`${API_BASE_URL}/orders`),
+        axios.get<Order[]>(`${API_BASE_URL}/orders/garland`),
+        axios.get<TransportBooking[]>(`${API_BASE_URL}/transport`),
+        axios.get<PartyHallBooking[]>(`${API_BASE_URL}/party-hall`),
+      ]);
+
+      setOrders(allOrdersRes.data || []);
+      setGarlandOrders(garlandOrdersRes.data || []);
+      setTransportBookings(transportRes.data || []);
+      setPartyHallBookings(partyHallRes.data || []);
+    } catch (err) {
+      console.error("❌ Error fetching admin data:", err);
+      alert("❌ Failed to load admin data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const busyOrderId = useMemo(() => {
+    if (confirmingId) return confirmingId;
+    if (updatingId) return updatingId;
+    if (remindingId) return remindingId;
+    return null;
+  }, [confirmingId, updatingId, remindingId]);
+
+  const confirmOrder = async (orderId: number) => {
+    try {
+      setConfirmingId(orderId);
+      const res = await fetch(`${API_BASE_URL}/orders/confirm/${orderId}`, {
+        method: "POST",
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Confirm failed");
+
+      await fetchOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Confirm failed";
+      console.error("❌ Confirm order failed:", error);
+      alert(`❌ ${message}`);
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
+  const updateStatus = async (orderId: number, status: string) => {
+    try {
+      setUpdatingId(orderId);
+
+      const res = await fetch(`${API_BASE_URL}/orders/status/${orderId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Update failed");
+
+      await fetchOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Update failed";
+      console.error("❌ Status update failed:", error);
+      alert(`❌ ${message}`);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const cancelOrder = async (orderId: number, reason: string) => {
+    if (!reason) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/admin-cancel/${orderId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Cancel failed");
+
+      await fetchOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cancel failed";
+      console.error("❌ Cancel failed:", error);
+      alert(`❌ ${message}`);
+    }
+  };
+
+  const sendGarlandReminder = async (orderId: number) => {
+    try {
+      setRemindingId(orderId);
+      const res = await fetch(
+        `${API_BASE_URL}/orders/garland/reminder/${orderId}`,
+        { method: "POST" }
+      );
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Reminder failed");
+
+      alert("✅ Reminder sent to user");
+      await fetchOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Reminder failed";
+      console.error("❌ Reminder failed:", error);
+      alert(`❌ ${message}`);
+    } finally {
+      setRemindingId(null);
+    }
+  };
+
+  const renderOrderRows = (list: Order[], isGarlandTable = false) => (
+    <tbody>
+      {list.map((order) => {
+        const displayStatus = order.tracking_status || order.status;
+        const status = getCurrentStatus(order);
+        const isBusy = busyOrderId === order.orderId;
+
+        const canConfirm = status === "PENDING";
+        const canPick = status === "CONFIRMED";
+        const canOut = status === "PICKED";
+        const canDeliver = status === "OUT_FOR_DELIVERY";
+        const canCancel = !["DELIVERED", "CANCELLED"].includes(status);
+
+        const hoursLeft = getHoursLeft(order.garland_delivery_at);
+        const canRemind =
+          isGarlandTable &&
+          !!order.garland_delivery_at &&
+          !!hoursLeft &&
+          hoursLeft > 0 &&
+          (order.garland_reminder_sent || 0) === 0;
+
+        return (
+          <tr key={order.orderId} className="hover:bg-gray-50 align-top">
+            <td className="p-3 border font-medium">#{order.orderId}</td>
+            <td className="p-3 border">{order.username}</td>
+
+            <td className="p-3 border min-w-[280px]">
+              <div className="space-y-2">
+                {order.items?.length > 0 ? (
+                  order.items.map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <img
+                        src={item.image || "https://via.placeholder.com/40"}
+                        onError={(e) =>
+                          ((e.target as HTMLImageElement).src =
+                            "https://via.placeholder.com/40")
+                        }
+                        alt={item.product_name}
+                        className="w-10 h-10 rounded object-cover border"
+                      />
+
+                      <div>
+                        <p className="font-medium">{item.product_name}</p>
+                        <p className="text-xs text-gray-500">
+                          ₹{item.unit_price} × {item.weight}kg = ₹{item.total_price}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-gray-400 italic">No items</span>
+                )}
+              </div>
+            </td>
+
+            <td className="p-3 border font-semibold">
+              ₹{Number(order.total_amount || 0).toFixed(2)}
+            </td>
+
+            <td className="p-3 border">
+              <Badge className={getStatusColor(displayStatus)}>{displayStatus}</Badge>
+
+              {order.cancel_reason && (
+                <p className="text-xs text-red-600 mt-1">❌ {order.cancel_reason}</p>
+              )}
+            </td>
+
+            <td className="p-3 border text-gray-600">
+              <p>Placed: {formatDate(order.created_at)}</p>
+              <p className="text-xs">Picked: {formatDate(order.picked_at)}</p>
+              <p className="text-xs">Out: {formatDate(order.out_for_delivery_at)}</p>
+              <p className="text-xs">Delivered: {formatDate(order.delivered_at)}</p>
+
+              {isGarlandTable && (
+                <>
+                  <p className="text-xs font-semibold text-orange-700 mt-1">
+                    Garland Delivery: {formatDate(order.garland_delivery_at)}
+                  </p>
+                  {hoursLeft !== null && (
+                    <p className="text-xs text-orange-700">
+                      Time left: {hoursLeft > 0 ? `${Math.ceil(hoursLeft)} hrs` : "Passed"}
+                    </p>
+                  )}
+                  <p className="text-xs text-indigo-700">
+                    Reminder: {(order.garland_reminder_sent || 0) === 1 ? "Sent" : "Not sent"}
+                  </p>
+                  {(order.garland_reminder_sent || 0) === 1 && (
+                    <p className="text-xs text-indigo-700">
+                      Reminder at: {formatDate(order.garland_last_reminder_at)}
+                    </p>
+                  )}
+                </>
+              )}
+            </td>
+
+            <td className="p-3 border">
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="sm"
+                  disabled={isBusy || !canConfirm}
+                  onClick={() => confirmOrder(order.orderId)}
+                >
+                  {confirmingId === order.orderId ? "Confirming..." : "Confirm"}
+                </Button>
+
+                <Button
+                  size="sm"
+                  disabled={isBusy || !canPick}
+                  onClick={() => updateStatus(order.orderId, "PICKED")}
+                >
+                  Pick
+                </Button>
+
+                <Button
+                  size="sm"
+                  disabled={isBusy || !canOut}
+                  onClick={() => updateStatus(order.orderId, "OUT_FOR_DELIVERY")}
+                >
+                  Out
+                </Button>
+
+                <Button
+                  size="sm"
+                  disabled={isBusy || !canDeliver}
+                  onClick={() => updateStatus(order.orderId, "DELIVERED")}
+                >
+                  Delivered
+                </Button>
+
+                {isGarlandTable && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={isBusy || !canRemind}
+                    onClick={() => sendGarlandReminder(order.orderId)}
+                  >
+                    {remindingId === order.orderId ? "Sending..." : "Send Reminder"}
+                  </Button>
+                )}
+
+                <select
+                  className="border p-1 rounded text-sm"
+                  defaultValue=""
+                  disabled={!canCancel || isBusy}
+                  onChange={(e) => {
+                    cancelOrder(order.orderId, e.target.value);
+                    e.currentTarget.value = "";
+                  }}
+                >
+                  <option value="">Cancel</option>
+                  {cancelReasons.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </td>
+          </tr>
+        );
+      })}
+    </tbody>
+  );
+
+  const renderOrderTable = (
+    title: string,
+    list: Order[],
+    isGarlandTable = false
+  ) => (
+    <Card className="shadow-lg">
+      <CardContent className="p-6">
+        <h2 className="text-xl font-semibold mb-4">{title}</h2>
+
+        {loading ? (
+          <p className="text-gray-500">Loading orders...</p>
+        ) : list.length === 0 ? (
+          <p className="text-gray-500">No orders found</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-3 border">Order ID</th>
+                  <th className="p-3 border">User</th>
+                  <th className="p-3 border">Items</th>
+                  <th className="p-3 border">Amount</th>
+                  <th className="p-3 border">Status</th>
+                  <th className="p-3 border">Timeline</th>
+                  <th className="p-3 border">Action</th>
+                </tr>
+              </thead>
+              {renderOrderRows(list, isGarlandTable)}
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const renderTransportTable = () => (
+    <Card className="shadow-lg">
+      <CardContent className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Transport Bookings</h2>
+        {loading ? (
+          <p className="text-gray-500">Loading transport bookings...</p>
+        ) : transportBookings.length === 0 ? (
+          <p className="text-gray-500">No transport bookings found</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-3 border">ID</th>
+                  <th className="p-3 border">User</th>
+                  <th className="p-3 border">From</th>
+                  <th className="p-3 border">To</th>
+                  <th className="p-3 border">KM</th>
+                  <th className="p-3 border">Charge</th>
+                  <th className="p-3 border">Phone</th>
+                  <th className="p-3 border">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transportBookings.map((b) => (
+                  <tr key={b.id} className="hover:bg-gray-50 align-top">
+                    <td className="p-3 border">#{b.id}</td>
+                    <td className="p-3 border">{b.username || b.customer_name}</td>
+                    <td className="p-3 border">{b.from_address}</td>
+                    <td className="p-3 border">{b.to_address}</td>
+                    <td className="p-3 border">{Number(b.distance_km).toFixed(2)}</td>
+                    <td className="p-3 border font-semibold">₹{Number(b.charge_amount).toFixed(2)}</td>
+                    <td className="p-3 border">{b.customer_phone}</td>
+                    <td className="p-3 border">{formatDate(b.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const renderPartyHallTable = () => (
+    <Card className="shadow-lg">
+      <CardContent className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Party Hall Bookings (3hr)</h2>
+        {loading ? (
+          <p className="text-gray-500">Loading party hall bookings...</p>
+        ) : partyHallBookings.length === 0 ? (
+          <p className="text-gray-500">No party hall bookings found</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-3 border">ID</th>
+                  <th className="p-3 border">User</th>
+                  <th className="p-3 border">Event</th>
+                  <th className="p-3 border">Persons</th>
+                  <th className="p-3 border">Snacks/Water/Cake</th>
+                  <th className="p-3 border">Services</th>
+                  <th className="p-3 border">Total</th>
+                  <th className="p-3 border">Phone</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partyHallBookings.map((b) => (
+                  <tr key={b.id} className="hover:bg-gray-50 align-top">
+                    <td className="p-3 border">#{b.id}</td>
+                    <td className="p-3 border">{b.username || b.customer_name}</td>
+                    <td className="p-3 border">
+                      <p>{b.event_date}</p>
+                      <p className="text-xs">{String(b.start_time).slice(0, 5)} - {String(b.end_time).slice(0, 5)}</p>
+                    </td>
+                    <td className="p-3 border">{b.person_count}</td>
+                    <td className="p-3 border">{b.snacks_count}/{b.water_count}/{b.cake_count}</td>
+                    <td className="p-3 border">{b.add_ons_json ? JSON.parse(b.add_ons_json).join(", ") : "-"}</td>
+                    <td className="p-3 border font-semibold">₹{Number(b.total_charge).toFixed(2)}</td>
+                    <td className="p-3 border">{b.customer_phone}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <h1 className="text-3xl font-bold text-gray-800">Admin Panel</h1>
+      {renderOrderTable("All Orders (excluding Garland)", nonGarlandOrders)}
+      {renderOrderTable(
+        "Garland Orders (date/time + reminder)",
+        garlandOrders,
+        true
+      )}
+      {renderTransportTable()}
+      {renderPartyHallTable()}
+    </div>
+  );
+};
+
+export default AdminPanel;
+
+===== frontend/src/pages/Checkout.tsx =====
+// src/pages/Checkout.tsx
+
+import React, { useState, useEffect } from "react";
+import Header from "@/components/Header";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { useNavigate } from "react-router-dom";
+import { Loader2, CheckCircle, MapPin } from "lucide-react";
+import { API_BASE_URL } from "../api";
+
+// ---------------- RAZORPAY LOADER ----------------
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
+const loadRazorpayScript = (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+// ------------------------------------------------
+
+interface CartItem {
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  image: string;
+  category?: string;
+  deliveryDate?: string; // ✅ ADDED
+}
+
+type PaymentMethod = "cod" | "online";
+
+type CheckoutProps = {
+  user: any;
+};
+
+const Checkout: React.FC<CheckoutProps> = ({ user }) => {
+  const navigate = useNavigate();
+
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [placing, setPlacing] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const [name, setName] = useState(user?.name || "");
+  const [phone, setPhone] = useState(user?.phone || "");
+  const [address, setAddress] = useState(user?.address || "");
+  const [paymentMethod, setPaymentMethod] =
+    useState<PaymentMethod>("cod");
+
+  const [locLoading, setLocLoading] = useState(false);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("cart");
+    if (raw) setCartItems(JSON.parse(raw));
+    setLoading(false);
+  }, []);
+
+  // ---------------- CALCULATIONS ----------------
+  const subtotal = cartItems.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0
+  );
+
+  const deliveryFee = subtotal >= 500 ? 0 : 5;
+  const grandTotal = subtotal + deliveryFee;
+  // ------------------------------------------------
+
+  // ---------------- USE CURRENT LOCATION ----------------
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation not supported");
+      return;
+    }
+
+    setLocLoading(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+          );
+          const data = await res.json();
+
+          if (data?.display_name) {
+            setAddress(data.display_name);
+          } else {
+            alert("Could not fetch address");
+          }
+        } catch (err) {
+          console.error(err);
+          alert("Failed to get address");
+        } finally {
+          setLocLoading(false);
+        }
+      },
+      () => {
+        alert("Location permission denied");
+        setLocLoading(false);
+      }
+    );
+  };
+  // ------------------------------------------------
+
+  // ---------------- RAZORPAY PAYMENT ----------------
+  const startRazorpayPayment = async () => {
+    const loaded = await loadRazorpayScript();
+    if (!loaded) {
+      alert("❌ Razorpay SDK failed");
+      return false;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const options = {
+        key: "rzp_live_S5dc6OUqbnjbGQ", // 🔴 replace later
+        amount: grandTotal * 100,
+        currency: "INR",
+        name: "VillageMart",
+        description: "Order Payment",
+        handler: function () {
+          resolve(true);
+        },
+        prefill: {
+          name,
+          contact: phone,
+        },
+        theme: { color: "#16a34a" },
+        modal: {
+          ondismiss: () => resolve(false),
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    });
+  };
+  // -------------------------------------------------
+
+  const placeOrder = async () => {
+    if (!name || !phone || !address) {
+      alert("❌ Fill all details");
+      return;
+    }
+
+    // ✅ GARLAND 24-HOUR VALIDATION
+    const hasInvalidGarland = cartItems.some((item: any) => {
+      if (item.category !== "Garlands" || !item.deliveryDate) return false;
+
+      const deliveryAt = new Date(item.deliveryDate);
+      const diffHours =
+        (deliveryAt.getTime() - new Date().getTime()) / (1000 * 60 * 60);
+
+      return diffHours < 24;
+    });
+
+    if (hasInvalidGarland) {
+      alert("❌ Garland orders must be placed 24 hours in advance.");
+      return;
+    }
+
+    setPlacing(true);
+
+    try {
+      if (paymentMethod === "online") {
+        const paid = await startRazorpayPayment();
+        if (!paid) throw new Error("Payment cancelled");
+      }
+
+      const formattedItems = cartItems.map((i) => {
+        const unitPrice = i.price;
+        const weight = i.quantity;
+        const totalPrice = unitPrice * weight;
+
+        return {
+          product_id: i.id,
+          product_name: i.name,
+          unit_price: unitPrice,
+          weight,
+          total_price: totalPrice,
+          image: i.image,
+          category: i.category,
+          deliveryDate: i.deliveryDate, // ✅ SEND TO BACKEND
+        };
+      });
+
+      const res = await fetch(`${API_BASE_URL}/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id,
+          items: formattedItems,
+          subtotal,
+          deliveryFee,
+          total: grandTotal,
+          address,
+          phone,
+          paymentMethod,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Order failed");
+      }
+
+      localStorage.removeItem("cart");
+      setSuccess(true);
+
+      setTimeout(() => navigate("/"), 2500);
+    } catch (err) {
+      console.error("Order error:", err);
+      alert("❌ Order failed. Check backend logs.");
+      setPlacing(false);
+    }
+  };
+
+  if (loading) return <p>Loading...</p>;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header user={user} />
+
+      {success && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <Card className="p-8 text-center animate-scale-in">
+            <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-3" />
+            <h2 className="text-2xl font-bold">
+              Order Confirmed 🎉
+            </h2>
+          </Card>
+        </div>
+      )}
+
+      <div className="max-w-3xl mx-auto p-6 space-y-4 animate-fade-in">
+        <Card className="p-6 space-y-4 transition-all duration-500 hover:shadow-lg">
+          <Input
+            placeholder="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+
+          <Input
+            placeholder="Phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+
+          <div className="flex gap-2">
+            <Input
+              placeholder="Address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={useCurrentLocation}
+              disabled={locLoading}
+              className="flex gap-2 items-center transition-all duration-300 hover:scale-105"
+            >
+              {locLoading ? (
+                <Loader2 className="animate-spin h-4 w-4" />
+              ) : (
+                <MapPin className="h-4 w-4" />
+              )}
+              Use Location
+            </Button>
+          </div>
+
+          <RadioGroup
+            value={paymentMethod}
+            onValueChange={(value) =>
+              setPaymentMethod(value as PaymentMethod)
+            }
+          >
+            <div className="flex gap-4">
+              <Label className="flex items-center gap-2 cursor-pointer">
+                <RadioGroupItem value="cod" /> COD
+              </Label>
+              <Label className="flex items-center gap-2 cursor-pointer">
+                <RadioGroupItem value="online" /> Online (Razorpay)
+              </Label>
+            </div>
+          </RadioGroup>
+
+          <Separator />
+
+          <div className="space-y-1 text-sm">
+            <p>Subtotal: ₹{subtotal.toFixed(2)}</p>
+            <p>Delivery Fee: ₹{deliveryFee.toFixed(2)}</p>
+            <p className="font-bold text-lg">
+              Grand Total: ₹{grandTotal.toFixed(2)}
+            </p>
+          </div>
+
+          <Button
+            disabled={placing}
+            onClick={placeOrder}
+            className="w-full transition-all duration-300 hover:scale-[1.02]"
+          >
+            {placing ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              "Place Order"
+            )}
+          </Button>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default Checkout;
+
+===== backend/src/routes/order.routes.ts =====
+import express from "express";
+import {
+  createOrder,
+  getAllOrders,
+  getGarlandOrders,
+  sendGarlandReminder,
+  getUserOrders,
+  confirmOrder,
+  updateOrderStatus,
+  adminCancelOrder,
+  userCancelOrder,
+} from "../controllers/order.controller";
+
+const router = express.Router();
+
+router.post("/", createOrder);
+router.get("/", getAllOrders);
+router.get("/garland", getGarlandOrders);
+router.post("/garland/reminder/:orderId", sendGarlandReminder);
+router.get("/user/:userId", getUserOrders);
+
+router.post("/confirm/:orderId", confirmOrder);
+router.post("/status/:orderId", updateOrderStatus);   // ✅ important
+router.post("/admin-cancel/:orderId", adminCancelOrder);
+router.post("/user-cancel/:orderId", userCancelOrder);
+
+export default router;
+
+===== backend/src/controllers/transport.controller.ts =====
+import { Request, Response } from "express";
+import db from "../db";
+
+type Coordinates = {
+  lat: number;
+  lng: number;
+};
+
+const TRANSPORT_RATE_PER_KM = 15;
+
+db.query(
+  `
+  CREATE TABLE IF NOT EXISTS transport_bookings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    customer_name VARCHAR(120) NOT NULL,
+    customer_phone VARCHAR(25) NOT NULL,
+    from_address TEXT NOT NULL,
+    from_lat DOUBLE NOT NULL,
+    from_lng DOUBLE NOT NULL,
+    to_address TEXT NOT NULL,
+    to_lat DOUBLE NOT NULL,
+    to_lng DOUBLE NOT NULL,
+    distance_km DECIMAL(10,2) NOT NULL,
+    charge_amount DECIMAL(10,2) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'BOOKED',
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_transport_user (user_id),
+    INDEX idx_transport_created (created_at),
+    CONSTRAINT fk_transport_user FOREIGN KEY (user_id) REFERENCES users(id)
+  )
+  `,
+  (err) => {
+    if (err) {
+      console.error("❌ Could not ensure transport_bookings table:", err);
+    }
+  }
+);
+
+const toNum = (value: any) => Number(value);
+
+const isFiniteNum = (value: any) => Number.isFinite(toNum(value));
+
+const haversineKm = (from: Coordinates, to: Coordinates) => {
+  const earthRadiusKm = 6371;
+  const dLat = ((to.lat - from.lat) * Math.PI) / 180;
+  const dLng = ((to.lng - from.lng) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((from.lat * Math.PI) / 180) *
+      Math.cos((to.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+};
+
+export const createTransportBooking = (req: Request, res: Response) => {
+  const {
+    userId,
+    customerName,
+    customerPhone,
+    fromAddress,
+    fromLat,
+    fromLng,
+    toAddress,
+    toLat,
+    toLng,
+    notes,
+  } = req.body;
+
+  if (
+    !userId ||
+    !customerName ||
+    !customerPhone ||
+    !fromAddress ||
+    !toAddress ||
+    !isFiniteNum(fromLat) ||
+    !isFiniteNum(fromLng) ||
+    !isFiniteNum(toLat) ||
+    !isFiniteNum(toLng)
+  ) {
+    return res.status(400).json({ message: "Invalid transport booking data" });
+  }
+
+  const from = { lat: toNum(fromLat), lng: toNum(fromLng) };
+  const to = { lat: toNum(toLat), lng: toNum(toLng) };
+
+  const distanceKm = haversineKm(from, to);
+
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+    return res.status(400).json({ message: "Unable to calculate transport distance" });
+  }
+
+  const roundedDistance = Number(distanceKm.toFixed(2));
+  const chargeAmount = Number((roundedDistance * TRANSPORT_RATE_PER_KM).toFixed(2));
+
+  const sql = `
+    INSERT INTO transport_bookings
+      (user_id, customer_name, customer_phone, from_address, from_lat, from_lng, to_address, to_lat, to_lng, distance_km, charge_amount, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(
+    sql,
+    [
+      Number(userId),
+      customerName,
+      customerPhone,
+      fromAddress,
+      from.lat,
+      from.lng,
+      toAddress,
+      to.lat,
+      to.lng,
+      roundedDistance,
+      chargeAmount,
+      notes || null,
+    ],
+    (err: any, result: any) => {
+      if (err) {
+        console.error("❌ createTransportBooking error:", err);
+        return res.status(500).json({ message: "Failed to create transport booking" });
+      }
+
+      db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+        Number(userId),
+        `🚕 Transport booked from ${fromAddress} to ${toAddress}. Charge ₹${chargeAmount}`,
+      ]);
+
+      return res.json({
+        success: true,
+        bookingId: result.insertId,
+        distance_km: roundedDistance,
+        charge_amount: chargeAmount,
+        rate_per_km: TRANSPORT_RATE_PER_KM,
+      });
+    }
+  );
+};
+
+export const getAllTransportBookings = (req: Request, res: Response) => {
+  const sql = `
+    SELECT
+      tb.id,
+      tb.user_id,
+      tb.customer_name,
+      tb.customer_phone,
+      tb.from_address,
+      tb.to_address,
+      tb.distance_km,
+      tb.charge_amount,
+      tb.status,
+      tb.notes,
+      tb.created_at,
+      u.username,
+      u.email
+    FROM transport_bookings tb
+    JOIN users u ON u.id = tb.user_id
+    ORDER BY tb.created_at DESC
+  `;
+
+  db.query(sql, (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getAllTransportBookings error:", err);
+      return res.status(500).json([]);
+    }
+
+    return res.json(rows || []);
+  });
+};
+
+export const getUserTransportBookings = (req: Request, res: Response) => {
+  const userId = Number(req.params.userId);
+  if (!userId) return res.status(400).json({ message: "Invalid user id" });
+
+  const sql = `
+    SELECT
+      id,
+      user_id,
+      customer_name,
+      customer_phone,
+      from_address,
+      to_address,
+      distance_km,
+      charge_amount,
+      status,
+      notes,
+      created_at
+    FROM transport_bookings
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+  `;
+
+  db.query(sql, [userId], (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getUserTransportBookings error:", err);
+      return res.status(500).json([]);
+    }
+
+    return res.json(rows || []);
+  });
+};
+
+===== backend/src/controllers/partyHall.controller.ts =====
+import { Request, Response } from "express";
+import db from "../db";
+
+const PARTY_HALL_BASE_CHARGE = 700;
+const PARTY_HALL_DURATION_HOURS = 3;
+const SUPPORT_NUMBER = "+91 8903003808";
+
+const addOnPriceMap: Record<string, number> = {
+  water: 5,
+  snacks: 30,
+  cake: 450,
+  decoration: 350,
+  tea: 15,
+};
+
+db.query(
+  `
+  CREATE TABLE IF NOT EXISTS party_hall_bookings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    customer_name VARCHAR(120) NOT NULL,
+    customer_phone VARCHAR(25) NOT NULL,
+    event_date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    person_count INT NOT NULL,
+    snacks_count INT NOT NULL DEFAULT 0,
+    water_count INT NOT NULL DEFAULT 0,
+    cake_count INT NOT NULL DEFAULT 0,
+    add_ons_json JSON NULL,
+    notes TEXT NULL,
+    base_charge DECIMAL(10,2) NOT NULL,
+    add_on_charge DECIMAL(10,2) NOT NULL,
+    total_charge DECIMAL(10,2) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'BOOKED',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_partyhall_user (user_id),
+    INDEX idx_partyhall_date (event_date),
+    CONSTRAINT fk_partyhall_user FOREIGN KEY (user_id) REFERENCES users(id)
+  )
+  `,
+  (err) => {
+    if (err) {
+      console.error("❌ Could not ensure party_hall_bookings table:", err);
+    }
+  }
+);
+
+const toDateTime = (date: string, time: string) => new Date(`${date}T${time}:00`);
+
+const formatTime = (value: Date) => value.toTimeString().slice(0, 8);
+
+const computeAddOnCharge = (
+  personCount: number,
+  snacksCount: number,
+  waterCount: number,
+  cakeCount: number,
+  selectedAddOns: string[]
+) => {
+  const addOnSet = new Set(selectedAddOns.map((a) => a.toLowerCase()));
+  let total = 0;
+
+  if (addOnSet.has("snacks")) total += snacksCount * addOnPriceMap.snacks;
+  if (addOnSet.has("water")) total += waterCount * addOnPriceMap.water;
+  if (addOnSet.has("cake")) total += cakeCount * addOnPriceMap.cake;
+  if (addOnSet.has("decoration")) total += addOnPriceMap.decoration;
+  if (addOnSet.has("tea")) total += personCount * addOnPriceMap.tea;
+
+  return Number(total.toFixed(2));
+};
+
+const hasSlotOverlap = (
+  eventDate: string,
+  startTime: string,
+  endTime: string,
+  cb: (overlap: boolean, err?: any) => void
+) => {
+  const sql = `
+    SELECT id FROM party_hall_bookings
+    WHERE event_date = ?
+      AND status <> 'CANCELLED'
+      AND NOT (end_time <= ? OR start_time >= ?)
+    LIMIT 1
+  `;
+
+  db.query(sql, [eventDate, startTime, endTime], (err: any, rows: any[]) => {
+    if (err) return cb(false, err);
+    return cb((rows || []).length > 0);
+  });
+};
+
+export const createPartyHallBooking = (req: Request, res: Response) => {
+  const {
+    userId,
+    customerName,
+    customerPhone,
+    eventDate,
+    startTime,
+    personCount,
+    snacksCount,
+    waterCount,
+    cakeCount,
+    addOns,
+    notes,
+  } = req.body;
+
+  if (!userId || !customerName || !customerPhone || !eventDate || !startTime) {
+    return res.status(400).json({ message: "Invalid party hall booking data" });
+  }
+
+  const totalPersons = Number(personCount || 0);
+  if (!Number.isFinite(totalPersons) || totalPersons <= 0) {
+    return res.status(400).json({ message: "Person count must be greater than 0" });
+  }
+
+  const start = toDateTime(eventDate, startTime);
+  if (Number.isNaN(start.getTime())) {
+    return res.status(400).json({ message: "Invalid start time" });
+  }
+
+  const end = new Date(start.getTime() + PARTY_HALL_DURATION_HOURS * 60 * 60 * 1000);
+  const endTime = formatTime(end);
+
+  const safeSnacks = Math.max(0, Number(snacksCount || 0));
+  const safeWater = Math.max(0, Number(waterCount || 0));
+  const safeCake = Math.max(0, Number(cakeCount || 0));
+  const selectedAddOns = Array.isArray(addOns)
+    ? addOns.map((a) => String(a).toLowerCase())
+    : [];
+
+  hasSlotOverlap(eventDate, startTime, endTime, (overlap, overlapErr) => {
+    if (overlapErr) {
+      console.error("❌ party hall overlap check error:", overlapErr);
+      return res.status(500).json({ message: "Failed to validate slot" });
+    }
+
+    if (overlap) {
+      return res.status(409).json({
+        message: "This time slot is already booked. Please choose another slot.",
+      });
+    }
+
+    const addOnCharge = computeAddOnCharge(
+      totalPersons,
+      safeSnacks,
+      safeWater,
+      safeCake,
+      selectedAddOns
+    );
+
+    const totalCharge = Number((PARTY_HALL_BASE_CHARGE + addOnCharge).toFixed(2));
+
+    const sql = `
+      INSERT INTO party_hall_bookings
+      (user_id, customer_name, customer_phone, event_date, start_time, end_time, person_count, snacks_count, water_count, cake_count, add_ons_json, notes, base_charge, add_on_charge, total_charge)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    db.query(
+      sql,
+      [
+        Number(userId),
+        customerName,
+        customerPhone,
+        eventDate,
+        startTime,
+        endTime,
+        totalPersons,
+        safeSnacks,
+        safeWater,
+        safeCake,
+        JSON.stringify(selectedAddOns),
+        notes || null,
+        PARTY_HALL_BASE_CHARGE,
+        addOnCharge,
+        totalCharge,
+      ],
+      (err: any, result: any) => {
+        if (err) {
+          console.error("❌ createPartyHallBooking error:", err);
+          return res.status(500).json({ message: "Failed to create party hall booking" });
+        }
+
+        db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+          Number(userId),
+          `🏛 Party hall booked on ${eventDate} ${startTime}-${endTime}. Clarification: ${SUPPORT_NUMBER}`,
+        ]);
+
+        return res.json({
+          success: true,
+          bookingId: result.insertId,
+          start_time: startTime,
+          end_time: endTime,
+          duration_hours: PARTY_HALL_DURATION_HOURS,
+          base_charge: PARTY_HALL_BASE_CHARGE,
+          add_on_charge: addOnCharge,
+          total_charge: totalCharge,
+          support_number: SUPPORT_NUMBER,
+        });
+      }
+    );
+  });
+};
+
+export const getPartyHallAvailability = (req: Request, res: Response) => {
+  const eventDate = String(req.query.date || "");
+  if (!eventDate) {
+    return res.status(400).json({ message: "date query param is required" });
+  }
+
+  const sql = `
+    SELECT id, start_time, end_time, status
+    FROM party_hall_bookings
+    WHERE event_date = ?
+      AND status <> 'CANCELLED'
+    ORDER BY start_time ASC
+  `;
+
+  db.query(sql, [eventDate], (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getPartyHallAvailability error:", err);
+      return res.status(500).json([]);
+    }
+
+    return res.json(rows || []);
+  });
+};
+
+export const getAllPartyHallBookings = (req: Request, res: Response) => {
+  const sql = `
+    SELECT
+      ph.id,
+      ph.user_id,
+      ph.customer_name,
+      ph.customer_phone,
+      ph.event_date,
+      ph.start_time,
+      ph.end_time,
+      ph.person_count,
+      ph.snacks_count,
+      ph.water_count,
+      ph.cake_count,
+      ph.add_ons_json,
+      ph.notes,
+      ph.base_charge,
+      ph.add_on_charge,
+      ph.total_charge,
+      ph.status,
+      ph.created_at,
+      u.username,
+      u.email
+    FROM party_hall_bookings ph
+    JOIN users u ON u.id = ph.user_id
+    ORDER BY ph.event_date DESC, ph.start_time DESC
+  `;
+
+  db.query(sql, (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getAllPartyHallBookings error:", err);
+      return res.status(500).json([]);
+    }
+
+    return res.json(rows || []);
+  });
+};
+
+export const getUserPartyHallBookings = (req: Request, res: Response) => {
+  const userId = Number(req.params.userId);
+  if (!userId) return res.status(400).json({ message: "Invalid user id" });
+
+  const sql = `
+    SELECT
+      id,
+      user_id,
+      customer_name,
+      customer_phone,
+      event_date,
+      start_time,
+      end_time,
+      person_count,
+      snacks_count,
+      water_count,
+      cake_count,
+      add_ons_json,
+      notes,
+      base_charge,
+      add_on_charge,
+      total_charge,
+      status,
+      created_at
+    FROM party_hall_bookings
+    WHERE user_id = ?
+    ORDER BY event_date DESC, start_time DESC
+  `;
+
+  db.query(sql, [userId], (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getUserPartyHallBookings error:", err);
+      return res.status(500).json([]);
+    }
+
+    return res.json(rows || []);
+  });
+};
+
+===== backend/src/routes/transport.routes.ts =====
+import express from "express";
+import {
+  createTransportBooking,
+  getAllTransportBookings,
+  getUserTransportBookings,
+} from "../controllers/transport.controller";
+
+const router = express.Router();
+
+router.post("/book", createTransportBooking);
+router.get("/", getAllTransportBookings);
+router.get("/user/:userId", getUserTransportBookings);
+
+export default router;
+
+===== backend/src/routes/partyHall.routes.ts =====
+import express from "express";
+import {
+  createPartyHallBooking,
+  getAllPartyHallBookings,
+  getPartyHallAvailability,
+  getUserPartyHallBookings,
+} from "../controllers/partyHall.controller";
+
+const router = express.Router();
+
+router.post("/book", createPartyHallBooking);
+router.get("/", getAllPartyHallBookings);
+router.get("/availability", getPartyHallAvailability);
+router.get("/user/:userId", getUserPartyHallBookings);
+
+export default router;
+
+===== backend/sql/service_bookings.sql =====
+-- Transport booking table
+CREATE TABLE IF NOT EXISTS transport_bookings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  customer_name VARCHAR(120) NOT NULL,
+  customer_phone VARCHAR(25) NOT NULL,
+  from_address TEXT NOT NULL,
+  from_lat DOUBLE NOT NULL,
+  from_lng DOUBLE NOT NULL,
+  to_address TEXT NOT NULL,
+  to_lat DOUBLE NOT NULL,
+  to_lng DOUBLE NOT NULL,
+  distance_km DECIMAL(10,2) NOT NULL,
+  charge_amount DECIMAL(10,2) NOT NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'BOOKED',
+  notes TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_transport_user (user_id),
+  INDEX idx_transport_created (created_at),
+  CONSTRAINT fk_transport_user FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Party hall booking table
+CREATE TABLE IF NOT EXISTS party_hall_bookings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  customer_name VARCHAR(120) NOT NULL,
+  customer_phone VARCHAR(25) NOT NULL,
+  event_date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  person_count INT NOT NULL,
+  snacks_count INT NOT NULL DEFAULT 0,
+  water_count INT NOT NULL DEFAULT 0,
+  cake_count INT NOT NULL DEFAULT 0,
+  add_ons_json JSON NULL,
+  notes TEXT NULL,
+  base_charge DECIMAL(10,2) NOT NULL,
+  add_on_charge DECIMAL(10,2) NOT NULL,
+  total_charge DECIMAL(10,2) NOT NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'BOOKED',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_partyhall_user (user_id),
+  INDEX idx_partyhall_date (event_date),
+  CONSTRAINT fk_partyhall_user FOREIGN KEY (user_id) REFERENCES users(id)
+);

@@ -2,6 +2,8 @@ import express from "express";
 import {
   createOrder,
   getAllOrders,
+  getGarlandOrders,
+  sendGarlandReminder,
   getUserOrders,
   confirmOrder,
   updateOrderStatus,
@@ -13,6 +15,8 @@ const router = express.Router();
 
 router.post("/", createOrder);
 router.get("/", getAllOrders);
+router.get("/garland", getGarlandOrders);
+router.post("/garland/reminder/:orderId", sendGarlandReminder);
 router.get("/user/:userId", getUserOrders);
 
 router.post("/confirm/:orderId", confirmOrder);

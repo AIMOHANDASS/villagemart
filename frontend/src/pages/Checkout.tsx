@@ -158,12 +158,15 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
     }
 
     // ✅ GARLAND 24-HOUR VALIDATION
-    const hasInvalidGarland = cartItems.some(
-      (item: any) =>
-        item.category === "Garlands" &&
-        item.deliveryDate &&
-        new Date(item.deliveryDate) < new Date()
-    );
+    const hasInvalidGarland = cartItems.some((item: any) => {
+      if (item.category !== "Garlands" || !item.deliveryDate) return false;
+
+      const deliveryAt = new Date(item.deliveryDate);
+      const diffHours =
+        (deliveryAt.getTime() - new Date().getTime()) / (1000 * 60 * 60);
+
+      return diffHours < 24;
+    });
 
     if (hasInvalidGarland) {
       alert("❌ Garland orders must be placed 24 hours in advance.");

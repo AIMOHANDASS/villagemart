@@ -7,9 +7,8 @@ import emailOtpRoutes from "./routes/emailOtp.routes";
 import forgotPasswordRoutes from "./routes/forgotPassword.routes";
 import googleAuthRoutes from "./routes/googleAuth.routes";
 import profileRoutes from "./routes/profile.routes";
-
-
-
+import transportRoutes from "./routes/transport.routes";
+import partyHallRoutes from "./routes/partyHall.routes";
 
 const app = express();
 
@@ -23,8 +22,8 @@ app.use("/api/email", emailOtpRoutes);
 app.use("/api/auth", forgotPasswordRoutes);
 app.use("/api/auth", googleAuthRoutes);
 app.use("/api/profile", profileRoutes);
-
-
+app.use("/api/transport", transportRoutes);
+app.use("/api/party-hall", partyHallRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });

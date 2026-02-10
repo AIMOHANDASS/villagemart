@@ -10,6 +10,8 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import AdminPanel from "./pages/AdminPanel";
 import TestMap from "./pages/TestMap";
+import Transport from "./pages/Transport";
+import PartyHall from "./pages/PartyHall";
 
 /* ✅ NEW PAGES */
 import MyOrders from "./pages/MyOrders";
@@ -42,6 +44,8 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin }) => {
 
       {/* ================= PUBLIC ROUTES ================= */}
       <Route path="/" element={<Home user={user} />} />
+      <Route path="/transport" element={<Transport user={user} />} />
+      <Route path="/party-hall" element={<PartyHall user={user} />} />
       <Route path="/signup" element={<Signup onLogin={onLogin} />} />
       <Route path="/login" element={<Login onLogin={onLogin} />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />

@@ -8,16 +8,39 @@ import {
   X,
   Clock,
   Flame,
+  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import truckImage from "@/assets/truck.png";
 
 type Props = { user?: any };
 
 const API_BASE_URL = "https://villagesmart.in/api";
 const POPULAR_SEARCHES = ["Onion", "Tomato", "Rice", "Oil", "Garland", "Milk"];
+
+const serviceItems = [
+  {
+    key: "villagemart",
+    label: "VillageMart",
+    path: "/",
+    icon: <img src="/favicon.png" alt="VillageMart" className="h-6 w-6 rounded" />,
+  },
+  {
+    key: "transport",
+    label: "Transport",
+    path: "/transport",
+    icon: <img src={truckImage} alt="Transport" className="h-6 w-6 rounded" />,
+  },
+  {
+    key: "partyhall",
+    label: "Party Hall",
+    path: "/party-hall",
+    icon: <Building2 className="h-5 w-5 text-violet-700" />,
+  },
+];
 
 const Header: React.FC<Props> = ({ user }) => {
   const [cartCount, setCartCount] = useState(0);
@@ -249,8 +272,30 @@ const Header: React.FC<Props> = ({ user }) => {
         </div>
 
         {/* NAV */}
-        <nav className="flex items-center space-x-6">
-          <Link to="/products" className="text-sm font-medium hover:text-primary">
+        <nav className="flex items-center space-x-3">
+          {serviceItems.map((service) => {
+            const active =
+              service.path === "/"
+                ? location.pathname === "/"
+                : location.pathname.startsWith(service.path);
+
+            return (
+              <button
+                key={service.key}
+                onClick={() => navigate(service.path)}
+                className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-green-100 text-green-800"
+                    : "hover:bg-muted text-foreground"
+                }`}
+              >
+                {service.icon}
+                <span>{service.label}</span>
+              </button>
+            );
+          })}
+
+          <Link to="/products" className="text-sm font-medium hover:text-primary px-2">
             All Products
           </Link>
         </nav>
@@ -329,6 +374,32 @@ const Header: React.FC<Props> = ({ user }) => {
               Login
             </button>
           )}
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {serviceItems.map((service) => {
+            const active =
+              service.path === "/"
+                ? location.pathname === "/"
+                : location.pathname.startsWith(service.path);
+
+            return (
+              <button
+                key={service.key}
+                onClick={() => navigate(service.path)}
+                className={`shrink-0 min-w-[120px] rounded-2xl border px-3 py-2 flex items-center gap-2 transition-colors ${
+                  active
+                    ? "bg-yellow-100 border-yellow-400"
+                    : "bg-white border-gray-200"
+                }`}
+              >
+                <span className="h-6 w-6 flex items-center justify-center rounded-full bg-white">
+                  {service.icon}
+                </span>
+                <span className="text-sm font-semibold">{service.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="relative">
