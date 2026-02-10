@@ -1,14 +1,21 @@
 // src/AppRoutes.tsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+
 import Home from "./pages/Home";
 import Signup from "./pages/Signup";
 import Login from "./pages/Login";
 import Products from "./pages/Products";
 import Cart from "./pages/Cart";
-import Checkout from "./pages/Checkout"; // <-- new page
+import Checkout from "./pages/Checkout";
 import AdminPanel from "./pages/AdminPanel";
-import TestMap from "./pages/TestMap"; // <-- new page
+import TestMap from "./pages/TestMap";
+
+/* ✅ NEW PAGES */
+import MyOrders from "./pages/MyOrders";
+import Notifications from "./pages/Notifications";
+import Profile from "./pages/Profile";
+import ForgotPassword from "./pages/ForgotPassword";
 
 type Props = {
   user: any;
@@ -16,26 +23,32 @@ type Props = {
   onLogout: () => void;
 };
 
-const AppRoutes: React.FC<Props> = ({ user, onLogin, onLogout }) => {
+const AppRoutes: React.FC<Props> = ({ user, onLogin }) => {
+
+  /* 🔐 User Protected Route */
   const PrivateRoute: React.FC<{ children: JSX.Element }> = ({ children }) => {
     return user ? children : <Navigate to="/login" replace />;
   };
 
+  /* 👑 Admin Route */
   const AdminRoute: React.FC<{ children: JSX.Element }> = ({ children }) => {
-    return user?.username === "Mohan" ? children : <Navigate to="/login" replace />;
+    return user?.username === "Mohan"
+      ? children
+      : <Navigate to="/login" replace />;
   };
 
   return (
     <Routes>
-      {/* Public Routes */}
+
+      {/* ================= PUBLIC ROUTES ================= */}
       <Route path="/" element={<Home user={user} />} />
       <Route path="/signup" element={<Signup onLogin={onLogin} />} />
       <Route path="/login" element={<Login onLogin={onLogin} />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/products" element={<Products user={user} />} />
       <Route path="/testmap" element={<TestMap />} />
 
-
-      {/* Protected Routes */}
+      {/* ================= USER ROUTES ================= */}
       <Route
         path="/cart"
         element={
@@ -44,6 +57,7 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin, onLogout }) => {
           </PrivateRoute>
         }
       />
+
       <Route
         path="/checkout"
         element={
@@ -53,7 +67,34 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin, onLogout }) => {
         }
       />
 
-      {/* Admin Route */}
+      <Route
+        path="/my-orders"
+        element={
+          <PrivateRoute>
+            <MyOrders user={user} />
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/notifications"
+        element={
+          <PrivateRoute>
+            <Notifications user={user} />
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/profile"
+        element={
+          <PrivateRoute>
+            <Profile user={user} />
+          </PrivateRoute>
+        }
+      />
+
+      {/* ================= ADMIN ROUTE ================= */}
       <Route
         path="/admin"
         element={
@@ -63,8 +104,9 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin, onLogout }) => {
         }
       />
 
-      {/* Catch-all redirect */}
+      {/* ================= FALLBACK ================= */}
       <Route path="*" element={<Navigate to="/" replace />} />
+
     </Routes>
   );
 };

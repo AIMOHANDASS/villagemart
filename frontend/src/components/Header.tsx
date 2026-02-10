@@ -1,236 +1,366 @@
-// src/components/Header.tsx
-import React, { useEffect, useState } from "react";
-import { ShoppingCart, Menu, Search } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  ShoppingCart,
+  Menu,
+  Search,
+  Bell,
+  Package,
+  X,
+  Clock,
+  Flame,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 type Props = { user?: any };
 
-// Placeholder for your API base URL (adjust as needed)
-const API_BASE_URL = "http://localhost:5000/api";
-
-// --- CONCEPTUAL LOGIN SIMULATION ---
-// In a real application, this logic would run right after a successful API login call.
-const fetchAndLoadUserCart = async (userId: string, userToken: string) => {
-    try {
-        // 1. Fetch the user's previously saved cart from the server
-        const res = await fetch(`${API_BASE_URL}/users/${userId}/cart`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                // Use a real authorization header in production:
-                // 'Authorization': `Bearer ${userToken}`,
-            },
-        });
-
-        if (res.ok) {
-            const serverCart = await res.json();
-            
-            // 2. Load the fetched cart into local storage (overwriting the empty one)
-            // This is the step that makes User A see their previous items.
-            localStorage.setItem("cart", JSON.stringify(serverCart.items || []));
-            window.dispatchEvent(new Event("storage")); // Update UI cart count
-            console.log(`Successfully fetched and loaded cart for user ${userId}.`);
-        } else {
-            // If the user has no saved cart (e.g., first login), the cart remains empty.
-            console.log(`No saved cart found on the server for user ${userId}.`);
-        }
-    } catch (error) {
-        console.error("Error loading user cart:", error);
-    }
-};
-// ------------------------------------
+const API_BASE_URL = "https://villagesmart.in/api";
+const POPULAR_SEARCHES = ["Onion", "Tomato", "Rice", "Oil", "Garland", "Milk"];
 
 const Header: React.FC<Props> = ({ user }) => {
-    const [cartCount, setCartCount] = useState(0); 
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const navigate = useNavigate();
+  const [cartCount, setCartCount] = useState(0);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [notifyCount, setNotifyCount] = useState(0);
 
-    const updateCartCount = () => {
-        const raw = localStorage.getItem("cart");
-        const cart = raw ? JSON.parse(raw) : [];
-        setCartCount(cart.length);
-    };
+  const [searchText, setSearchText] = useState("");
+  const [allProductNames, setAllProductNames] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
 
-    useEffect(() => {
-        updateCartCount();
-        window.addEventListener("storage", updateCartCount);
-        return () => window.removeEventListener("storage", updateCartCount);
-    }, []);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const inputRef = useRef<HTMLInputElement>(null);
 
-    // --- NEW: LOGIC TO LOAD CART ON USER CHANGE (LOGIN) ---
-    useEffect(() => {
-        // This effect runs whenever the 'user' prop changes (e.g., after login).
-        if (user && user.id) {
-            // Check local storage. Since it was cleared on the previous logout, 
-            // the cart is currently empty, so we must fetch the user's saved cart.
-            const raw = localStorage.getItem("cart");
-            if (!raw || JSON.parse(raw).length === 0) {
-                // Assuming 'user' object contains necessary info like 'id' and 'token'
-                fetchAndLoadUserCart(user.id, user.token || 'dummy-token');
-            }
-        }
-    }, [user]); // Rerun when user object changes
+  /* ================= CART COUNT ================= */
+  const updateCartCount = () => {
+    const raw = localStorage.getItem("cart");
+    const cart = raw ? JSON.parse(raw) : [];
+    setCartCount(cart.length);
+  };
 
-    // --- UPDATED LOGOUT FUNCTION ---
-    const handleLogout = async () => {
-        // 1. Get the current cart from localStorage
-        const currentLocalCart = localStorage.getItem("cart");
+  useEffect(() => {
+    updateCartCount();
+    window.addEventListener("storage", updateCartCount);
+    return () => window.removeEventListener("storage", updateCartCount);
+  }, []);
 
-        if (currentLocalCart && user && user.id) {
-            try {
-                // 2. SIMULATE: Save the current local cart to the server tied to the user's ID
-                console.log(`Saving cart for user ${user.id} before logout...`);
-                await fetch(`${API_BASE_URL}/users/${user.id}/cart`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: currentLocalCart, 
-                });
-                console.log("Cart saved successfully.");
-            } catch (error) {
-                console.error("Failed to save cart on logout. Proceeding with logout:", error);
-            }
-        }
+  /* ================= LOAD PRODUCT NAMES ================= */
+  useEffect(() => {
+    fetch("/datadetails1.csv")
+      .then((res) => res.text())
+      .then((csvText) => {
+        const rows = csvText.split("\n").slice(1);
+        const names = rows
+          .map((row) => row.split(",")[1]?.replace(/"/g, ""))
+          .filter(Boolean);
+        setAllProductNames(names);
+      })
+      .catch(() => {});
+  }, []);
 
-        // 3. CRUCIAL STEP: Clear the cart from localStorage. 
-        // This ensures the next person (User B) using this browser sees an empty cart.
-        localStorage.removeItem("cart");
-        window.dispatchEvent(new Event("storage")); // Force header to display cart count 0
+  /* ================= LOAD RECENT ================= */
+  useEffect(() => {
+    const saved = JSON.parse(localStorage.getItem("recent-searches") || "[]");
+    setRecent(saved);
+  }, []);
 
-        // 4. Log out the user 
-        localStorage.removeItem("user");
-        
-        // 5. Navigate home and refresh 
-        navigate("/");
-        window.location.reload(); 
-    };
-    // ------------------------------------
+  /* ================= FETCH NOTIFICATION COUNT ================= */
+  useEffect(() => {
+    if (!user?.id) return;
 
-    // --- CONCEPTUAL LOGIN HANDLER ---
-    // Since we can't fully implement login here, this button simulates success
-    // and relies on the parent component updating the `user` prop.
-    const handleLoginClick = () => {
-        navigate("/login");
-        
-        // After a successful login, the parent component should update the `user` prop,
-        // which triggers the useEffect hook above to load the user's cart.
-        
-        // SIMULATION: If you were testing here, you might simulate setting a user object:
-        // const dummyUser = { id: 'user_a_123', username: 'User A', token: 'xyz' };
-        // localStorage.setItem('user', JSON.stringify(dummyUser));
-        // window.location.reload(); // Or dispatch an event to update the state
-    };
+    fetch(`${API_BASE_URL}/notifications/${user.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const unread = data.filter((n: any) => !n.is_read);
+        setNotifyCount(unread.length);
+      })
+      .catch(() => {});
+  }, [user]);
 
+  /* ================= LIVE SUGGESTIONS ================= */
+  useEffect(() => {
+    if (!searchText.trim()) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
 
+    const filtered = allProductNames
+      .filter((name) =>
+        name.toLowerCase().includes(searchText.toLowerCase())
+      )
+      .slice(0, 6);
+
+    setSuggestions(filtered);
+    setShowSuggestions(true);
+    setActiveIndex(-1);
+  }, [searchText, allProductNames]);
+
+  useEffect(() => {
+    setShowSuggestions(false);
+  }, [location.pathname, location.search]);
+
+  /* ================= SEARCH ================= */
+  const doSearch = (value: string) => {
+    if (!value.trim()) return;
+
+    setSearchText(value);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setActiveIndex(-1);
+
+    const updated = [value, ...recent.filter((r) => r !== value)].slice(0, 5);
+    setRecent(updated);
+    localStorage.setItem("recent-searches", JSON.stringify(updated));
+
+    navigate(`/products?search=${encodeURIComponent(value)}`);
+    inputRef.current?.blur();
+    setIsMenuOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggestions) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doSearch(activeIndex >= 0 ? suggestions[activeIndex] : searchText);
+    }
+    if (e.key === "Escape") {
+      setShowSuggestions(false);
+    }
+  };
+
+  const highlight = (text: string) => {
+    const idx = text.toLowerCase().indexOf(searchText.toLowerCase());
+    if (idx === -1) return text;
     return (
-        <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="container flex h-16 items-center justify-between">
-                {/* Logo and Mobile Menu Toggle */}
-                <div className="flex items-center space-x-4">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="md:hidden"
-                        onClick={() => setIsMenuOpen(!isMenuOpen)}
-                    >
-                        <Menu className="h-5 w-5" />
-                    </Button>
-                    <Link to="/" className="flex items-center space-x-2">
-                        <div className="h-8 w-8 rounded bg-gradient-to-br from-primary to-village-green-light flex items-center justify-center">
-                            <span className="text-sm font-bold text-primary-foreground">VM</span>
-                        </div>
-                        <span className="text-xl font-bold text-primary">VillageMart</span>
-                    </Link>
-                </div>
-
-                {/* Search Bar */}
-                <div className="flex-1 max-w-sm mx-4 hidden md:block">
-                    <div className="relative">
-                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            type="search"
-                            placeholder="Search groceries, fruits, vegetables, garlands..."
-                            className="pl-8 bg-muted/50"
-                        />
-                    </div>
-                </div>
-
-                {/* Navigation */}
-                <nav className="hidden md:flex items-center space-x-6">
-                    <Link to="/products?category=Vegetables" className="text-sm font-medium hover:text-primary transition-colors"> Vegetables </Link>
-                    <Link to="/products?category=Fruits" className="text-sm font-medium hover:text-primary transition-colors"> Fruits </Link>
-                    <Link to="/products?category=Garlands" className="text-sm font-medium hover:text-primary transition-colors"> Garlands </Link>
-                    <Link to="/products" className="text-sm font-medium hover:text-primary transition-colors"> All Products </Link>
-                </nav>
-
-                {/* Actions */}
-                <div className="flex items-center space-x-2">
-                    <Button variant="ghost" size="icon" className="md:hidden">
-                        <Search className="h-5 w-5" />
-                    </Button>
-
-                    {user ? (
-                        <>
-                            <span className="hidden md:block text-sm font-medium">Hello, {user.username || 'User'}</span>
-                            <Button variant="ghost" size="sm" onClick={handleLogout}>
-                                Logout
-                            </Button>
-                        </>
-                    ) : (
-                        <Button variant="ghost" size="sm" onClick={handleLoginClick}>
-                            Login
-                        </Button>
-                    )}
-
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative"
-                        onClick={() => navigate("/cart")}
-                    >
-                        <ShoppingCart className="h-5 w-5" />
-                        {cartCount > 0 && (
-                            <Badge
-                                variant="secondary"
-                                className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs bg-village-gold text-village-green"
-                            >
-                                {cartCount}
-                            </Badge>
-                        )}
-                    </Button>
-                </div>
-            </div>
-
-            {/* Mobile Menu (unchanged) */}
-            {isMenuOpen && (
-                <div className="border-t md:hidden">
-                    <div className="container py-4 space-y-4">
-                        <div className="relative">
-                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                type="search"
-                                placeholder="Search groceries, fruits, vegetables, garlands..."
-                                className="pl-8 bg-muted/50"
-                            />
-                        </div>
-                        <nav className="flex flex-col space-y-2">
-                            <Link to="/products?category=Vegetables" className="text-sm font-medium hover:text-primary transition-colors py-2"> Vegetables </Link>
-                            <Link to="/products?category=Fruits" className="text-sm font-medium hover:text-primary transition-colors py-2"> Fruits </Link>
-                            <Link to="/products?category=Garlands" className="text-sm font-medium hover:text-primary transition-colors py-2"> Garlands </Link>
-                            <Link to="/products" className="text-sm font-medium hover:text-primary transition-colors py-2"> All Products </Link>
-                            {user ? (
-                                <button onClick={handleLogout} className="text-sm text-red-600 py-2 text-left"> Logout </button>
-                            ) : (
-                                <button onClick={handleLoginClick} className="text-sm text-blue-600 py-2 text-left"> Login </button>
-                            )}
-                        </nav>
-                    </div>
-                </div>
-            )}
-        </header>
+      <>
+        {text.slice(0, idx)}
+        <span className="text-green-600 font-bold">
+          {text.slice(idx, idx + searchText.length)}
+        </span>
+        {text.slice(idx + searchText.length)}
+      </>
     );
+  };
+
+  /* ================= LOGOUT ================= */
+  const handleLogout = () => {
+    localStorage.removeItem("cart");
+    localStorage.removeItem("user");
+    window.dispatchEvent(new Event("storage"));
+    navigate("/");
+    window.location.reload();
+  };
+
+  /* ================= OPEN NOTIFICATIONS ================= */
+  const openNotifications = () => {
+    navigate("/notifications");
+    setNotifyCount(0);
+    setIsMenuOpen(false);
+  };
+
+  return (
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
+
+      {/* 💻 DESKTOP HEADER */}
+      <div className="hidden md:flex items-center space-x-6 container mx-auto px-4 py-3">
+
+        <Link to="/" className="flex items-center space-x-2">
+          <img src="/favicon.png" alt="VillageMart" className="h-10 w-10 rounded" />
+          <span className="text-xl font-bold text-primary">VillageMart</span>
+        </Link>
+
+        {/* SEARCH */}
+        <div className="flex-1 max-w-sm mx-4 relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            ref={inputRef}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onKeyDown={onKeyDown}
+            type="search"
+            placeholder="Search groceries, fruits, vegetables..."
+            className="pl-8 bg-muted/50"
+          />
+
+          {showSuggestions && (
+            <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow z-50 p-2">
+              {suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  onMouseDown={() => doSearch(s)}
+                  className={`px-3 py-2 cursor-pointer text-sm flex items-center justify-between ${
+                    i === 0 ? "bg-green-50" : "hover:bg-gray-100"
+                  }`}
+                >
+                  <span>{highlight(s)}</span>
+                  {i === 0 && (
+                    <Badge className="bg-green-600 text-white">Top</Badge>
+                  )}
+                </div>
+              ))}
+
+              {recent.length > 0 && (
+                <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                  <div className="font-semibold mb-1 flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Recent
+                  </div>
+                  {recent.map((r) => (
+                    <div
+                      key={r}
+                      onMouseDown={() => doSearch(r)}
+                      className="px-3 py-1 cursor-pointer hover:bg-gray-100"
+                    >
+                      {r}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                <div className="font-semibold mb-1 flex items-center gap-1">
+                  <Flame className="h-3 w-3" /> Popular
+                </div>
+                {POPULAR_SEARCHES.map((p) => (
+                  <div
+                    key={p}
+                    onMouseDown={() => doSearch(p)}
+                    className="px-3 py-1 cursor-pointer hover:bg-gray-100"
+                  >
+                    {p}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* NAV */}
+        <nav className="flex items-center space-x-6">
+          <Link to="/products" className="text-sm font-medium hover:text-primary">
+            All Products
+          </Link>
+        </nav>
+
+        {/* ACTIONS */}
+        <div className="flex items-center space-x-2">
+
+          {user && (
+            <Button variant="ghost" size="icon" className="relative" onClick={openNotifications}>
+              <Bell className="h-5 w-5" />
+              {notifyCount > 0 && (
+                <Badge className="absolute -top-1 -right-1 bg-red-600 text-white">
+                  {notifyCount}
+                </Badge>
+              )}
+            </Button>
+          )}
+
+          {user && (
+            <Button variant="ghost" size="sm" onClick={() => navigate("/my-orders")}>
+              <Package className="h-4 w-4 mr-1" />
+              My Orders
+            </Button>
+          )}
+
+          {user && (
+            <Button variant="ghost" size="icon" onClick={() => navigate("/profile")}>
+              👤
+            </Button>
+          )}
+
+          {user ? (
+            <Button variant="ghost" size="sm" onClick={handleLogout}>
+              Logout
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={() => navigate("/login")}>
+              Login
+            </Button>
+          )}
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative"
+            onClick={() => navigate("/cart")}
+          >
+            <ShoppingCart className="h-5 w-5" />
+            {cartCount > 0 && (
+              <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
+                {cartCount}
+              </Badge>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* 📱 MOBILE HEADER */}
+      <div className="md:hidden px-3 py-2 flex flex-col gap-2 bg-white shadow">
+        <div className="flex items-center justify-between">
+          <button onClick={() => setIsMenuOpen(!isMenuOpen)}>
+            {isMenuOpen ? <X /> : <Menu />}
+          </button>
+
+          <Link to="/" className="flex items-center gap-2">
+            <img src="/favicon.png" className="h-8 w-8 rounded" />
+            <span className="font-bold text-primary">VillageMart</span>
+          </Link>
+
+          {user ? (
+            <button onClick={handleLogout} className="text-sm font-semibold text-red-600">
+              Logout
+            </button>
+          ) : (
+            <button onClick={() => navigate("/login")} className="text-sm font-semibold text-primary">
+              Login
+            </button>
+          )}
+        </div>
+
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            ref={inputRef}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Search products..."
+            className="pl-8 bg-muted/50"
+          />
+
+          {showSuggestions && (
+            <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow z-50 p-2">
+              {suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  onMouseDown={() => doSearch(s)}
+                  className={`px-3 py-2 cursor-pointer text-sm ${
+                    i === 0 ? "bg-green-50" : "hover:bg-gray-100"
+                  }`}
+                >
+                  {highlight(s)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
 };
 
 export default Header;

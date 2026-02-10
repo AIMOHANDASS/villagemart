@@ -1,5 +1,5 @@
 id,name,price,image,category,rating,reviews,inStock,isOrganic
-1,Ghee,21,https://keralaayurveda.biz/cdn/shop/articles/unnamed_53d6b8aa-8a09-448f-9fea-6e04472a3689.jpg?v=1752079400&width=700,Groceries,4.5,100,TRUE,FALSE
+1,Ghee,21,https://cdn.shopify.com/s/files/1/0586/8234/3501/files/cow_desi_ghee_image.webp?v=1742634983,Groceries,4.5,100,TRUE,FALSE
 2,Urad Dal (Black Gram Dal),84,https://cdn.shopify.com/s/files/1/0627/8266/8969/files/Chana_Dal_480x480.webp?v=1705988578,Groceries,4.5,100,TRUE,FALSE
 3,Raw Rice,105,https://www.aramiyarkai.com/admin/images/blog/ponni-raw_BID53.webp,Groceries,4.5,100,TRUE,FALSE
 4,Sugar,53,https://i0.wp.com/vrmshoppe.com/wp-content/uploads/2021/05/white-sugar-500x500-1.jpg?fit=500%2C500&ssl=1,Groceries,4.5,100,TRUE,FALSE
@@ -13,7 +13,7 @@ id,name,price,image,category,rating,reviews,inStock,isOrganic
 12,Oil,210,https://5.imimg.com/data5/SELLER/Default/2023/7/327751453/BQ/UF/YZ/112155041/5-l-gold-winner-refined-sunflower-oil-1000x1000.jpeg,Groceries,4.5,100,TRUE,FALSE
 13,Coconut Oil,110,https://naturesbox.in/cdn/shop/products/Coconut-Oil-back_82eb07f5-397e-4302-9d27-18d9676f1fd9_540x.jpg?v=1673614342,Groceries,4.5,100,TRUE,FALSE
 14,Coffee Powder,62,https://m.media-amazon.com/images/I/71mdCt8pa-L._SL1500_.jpg,Groceries,4.5,100,TRUE,FALSE
-15,Garlic,85.5,"https://static.toiimg.com/thumb/msid-123456524,imgsize-1412912,width-400,resizemode-4/1.jpg",Groceries,4.5,100,TRUE,FALSE
+15,Garlic,85.5,https://plus.unsplash.com/premium_photo-1666270423754-5b66a5184cc3?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8Z2FybGljfGVufDB8fDB8fHww,Groceries,4.5,100,TRUE,FALSE
 16,Green Gram,87,https://pureandsure.in/cdn/shop/files/Green-gram-Whole-A.jpg?v=1727180752&width=700,Groceries,4.5,100,TRUE,FALSE
 17,Jaggery,22,https://orgfarm.store/cdn/shop/files/round-jaggery-500x500.jpg?v=1722456844&width=1500,Groceries,4.5,100,TRUE,FALSE
 18,Spices/Aromatics,112,https://www.alimentarium.org/sites/default/files/media/image/2016-10/shutterstock_mythja_epices_306621401_WEB_0.jpg,Groceries,4.5,100,TRUE,FALSE

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import AppRoutes from "./router";
-
+import MobileBottomNav from "@/components/MobileBottomNav";
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(() => {
@@ -12,18 +12,30 @@ const App: React.FC = () => {
     }
   });
 
+  /* ✅ Login */
   const handleLogin = (userObj: any) => {
     localStorage.setItem("user", JSON.stringify(userObj));
     setUser(userObj);
   };
 
+  /* ✅ Logout */
   const handleLogout = () => {
     localStorage.removeItem("user");
     setUser(null);
   };
 
   return (
-    <AppRoutes user={user} onLogin={handleLogin} onLogout={handleLogout} />
+    <>
+      {/* 🌐 Routes */}
+      <AppRoutes
+        user={user}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+      />
+
+      {/* 📱 Mobile Bottom Navigation */}
+      <MobileBottomNav user={user} />
+    </>
   );
 };
 

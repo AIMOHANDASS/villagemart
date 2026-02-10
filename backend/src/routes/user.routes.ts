@@ -1,10 +1,10 @@
 import express from "express";
-import { signupUser, loginUser } from "../controllers/user.Controller";
+import { signupUser, loginUser, checkUsername } from "../controllers/user.Controller";
 
 const router = express.Router();
 
-// Auth routes
-router.post("/signup", signupUser);
+router.post("/signup", signupUser);   // ✅ matches signup.tsx
 router.post("/login", loginUser);
+router.get("/check-username/:username", checkUsername);
 
 export default router;

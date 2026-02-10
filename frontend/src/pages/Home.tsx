@@ -68,11 +68,11 @@ const Home: React.FC<HomeProps> = ({ user }) => {
   ];
 
   const categories = [
+    { name: "Groceries", icon: "🛒", count: "150+ items" },
     { name: "Vegetables", icon: "🥕", count: "120+ items" },
     { name: "Fruits", icon: "🍎", count: "85+ items" },
     { name: "Dairy", icon: "🥛", count: "35+ items" },
     { name: "Garlands", icon: "🌸", count: "50+ items" },
-    { name: "Spices", icon: "🌶️", count: "40+ items" },
     { name: "Grains", icon: "🌾", count: "25+ items" },
   ];
 

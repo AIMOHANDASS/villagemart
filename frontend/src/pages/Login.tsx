@@ -1,22 +1,25 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../api";
+import { GoogleLogin } from "@react-oauth/google";
 
 type Props = { onLogin: (u: any) => void };
 
 const Login: React.FC<Props> = ({ onLogin }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
+  /* ---------------- NORMAL LOGIN ---------------- */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    // ✅ Admin shortcut
+    /* ✅ Admin shortcut (UNCHANGED) */
     if (username === "Mohan" && password === "mohan123") {
-      const admin = { username: "Mohan", email: "admin@local", role: "admin" };
+      const admin = { username: "Mohan", role: "admin" };
       localStorage.setItem("user", JSON.stringify(admin));
       onLogin(admin);
       navigate("/admin");
@@ -30,126 +33,142 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         body: JSON.stringify({ username, password }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        setError("Server error. Try again later.");
+        return;
+      }
 
       if (!res.ok) {
         setError(data.message || "Invalid credentials");
         return;
       }
 
-      if (data.token && data.user) {
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("user", JSON.stringify(data.user));
-        onLogin(data.user);
+      localStorage.setItem("user", JSON.stringify(data.user));
+      onLogin(data.user);
+      navigate("/");
+    } catch {
+      setError("Network error");
+    }
+  };
+
+  /* ---------------- GOOGLE LOGIN ---------------- */
+  const handleGoogleLogin = async (token?: string) => {
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/google`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError("Google login failed");
+        return;
       }
 
+      localStorage.setItem("user", JSON.stringify(data.user));
+      onLogin(data.user);
       navigate("/");
-    } catch (err: any) {
-      console.error("Login error:", err);
-      setError("❌ Network error. Try again later.");
+    } catch {
+      setError("Google login error");
     }
   };
 
   return (
-    // Wrapper for centering the form and setting a page background
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <form
         onSubmit={handleSubmit}
-        // Tailwind Classes for Form Container: Modern, Animated, Elevated
-        className="
-          max-w-sm w-full mx-auto p-8 
-          bg-white 
-          rounded-2xl 
-          shadow-2xl 
-          hover:shadow-3xl 
-          transition duration-500 ease-in-out 
-          transform hover:scale-[1.01]
-          border border-gray-100
-        "
+        className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm
+                   border border-gray-200 animate-fade-in"
       >
-        <h2 className="text-3xl font-extrabold mb-6 text-center text-gray-800">
-          Welcome Back
+        <h2 className="text-3xl font-bold mb-6 text-center text-gray-800">
+          Login
         </h2>
 
-        {/* Error Message Style: Prominent with animation */}
         {error && (
-          <p className="text-red-600 bg-red-100 p-3 rounded-lg border border-red-300 mb-4 font-medium animate-pulse">
+          <p className="text-red-600 bg-red-100 p-3 rounded-lg mb-4 text-sm animate-shake">
             {error}
           </p>
         )}
 
-        {/* Username Input Style: Focus ring effect */}
+        {/* USERNAME */}
         <input
           placeholder="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          className="
-            w-full p-3 mb-4 
-            border border-gray-300 
-            rounded-xl 
-            focus:outline-none 
-            focus:ring-2 
-            focus:ring-blue-500 
-            focus:border-transparent 
-            transition duration-300
-          "
           required
-        />
-        
-        {/* Password Input Style: Focus ring effect */}
-        <input
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="
-            w-full p-3 mb-6 
-            border border-gray-300 
-            rounded-xl 
-            focus:outline-none 
-            focus:ring-2 
-            focus:ring-blue-500 
-            focus:border-transparent 
-            transition duration-300
-          "
-          required
+          className="w-full p-3 mb-4 border rounded-xl
+                     focus:ring-2 focus:ring-blue-500"
         />
 
-        {/* Login Button Style: Gradient, Shadow, Hover Lift and Color Shift */}
+        {/* PASSWORD WITH EYE */}
+        <div className="relative mb-2">
+          <input
+            type={showPassword ? "text" : "password"}
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full p-3 border rounded-xl pr-12
+                       focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute right-3 top-3 text-lg hover:scale-110 transition"
+          >
+            {showPassword ? "🙈" : "👁️"}
+          </button>
+        </div>
+
+        {/* FORGOT PASSWORD */}
+        <div className="text-right mb-5">
+          <button
+            type="button"
+            onClick={() => navigate("/forgot-password")}
+            className="text-sm text-blue-600 hover:text-blue-800 transition"
+          >
+            Forgot password?
+          </button>
+        </div>
+
+        {/* LOGIN BUTTON */}
         <button
           type="submit"
-          className="
-            w-full 
-            bg-gradient-to-r from-blue-600 to-blue-500 
-            text-white 
-            text-lg 
-            font-semibold 
-            p-3 
-            rounded-xl 
-            shadow-lg 
-            shadow-blue-500/50 
-            hover:shadow-xl 
-            hover:from-blue-700 hover:to-blue-600 
-            transition duration-300 ease-in-out 
-            transform hover:-translate-y-0.5
-          "
+          className="w-full bg-blue-600 hover:bg-blue-700
+                     text-white font-semibold p-3 rounded-xl
+                     transition hover:scale-[1.02]"
         >
           Login
         </button>
 
-        {/* Sign Up Link Style: Subtle hover effect */}
-        <p className="text-center mt-6 text-gray-600">
+        {/* OR */}
+        <div className="flex items-center gap-2 my-5">
+          <div className="flex-1 h-px bg-gray-300"></div>
+          <span className="text-gray-500 text-sm">OR</span>
+          <div className="flex-1 h-px bg-gray-300"></div>
+        </div>
+
+        {/* GOOGLE LOGIN */}
+        <GoogleLogin
+          onSuccess={(res) => handleGoogleLogin(res.credential)}
+          onError={() => setError("Google login cancelled")}
+        />
+
+        {/* SIGNUP LINK */}
+        <p className="text-center mt-6 text-gray-600 text-sm">
           Don’t have an account?{" "}
           <button
             type="button"
             onClick={() => navigate("/signup")}
-            className="
-              text-blue-600 
-              font-medium 
-              hover:text-blue-800 
-              transition duration-200 
-              focus:outline-none
-            "
+            className="text-blue-600 font-medium hover:text-blue-800 transition"
           >
             Sign up
           </button>

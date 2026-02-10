@@ -1,25 +1,83 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <!-- ================= BASIC META ================= -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VillageMart - Fresh Groceries & Beautiful Garlands for Rural Communities</title>
-    <meta name="description" content="Order fresh groceries and handmade garlands online. Fast delivery to villages with UPI payments. Quality products from local vendors." />
+
+    <title>VillageMart – Fresh Vegetables, Fruits & Groceries Online</title>
+
+    <meta
+      name="description"
+      content="Buy fresh vegetables, fruits, groceries and garlands online. Fast village delivery with secure UPI payments like GPay, PhonePe and Paytm. Trusted rural marketplace."
+    />
+
+    <meta
+      name="keywords"
+      content="village mart, villagemart,villagemart near me, fresh vegetables online, grocery delivery village, fruits online, rural ecommerce, garlands online, buy groceries online, village delivery"
+    />
+
     <meta name="author" content="VillageMart" />
-    <meta name="keywords" content="village mart, rural ecommerce, fresh groceries, garlands, wedding garlands, village delivery, UPI payment" />
+    <meta name="robots" content="index, follow" />
 
-    <meta property="og:title" content="VillageMart - Fresh Groceries & Beautiful Garlands for Rural Communities" />
-    <meta property="og:description" content="Order fresh groceries and handmade garlands online. Fast delivery to villages with UPI payments." />
+    <!-- ================= CANONICAL ================= -->
+    <link rel="canonical" href="https://villagesmart.in/" />
+
+    <!-- ================= OPEN GRAPH (SOCIAL SHARE) ================= -->
+    <meta
+      property="og:title"
+      content="VillageMart – Fresh Vegetables, Fruits & Groceries Online"
+    />
+    <meta
+      property="og:description"
+      content="Order fresh vegetables, fruits, groceries and garlands online with fast village delivery and secure UPI payments."
+    />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta property="og:url" content="https://villagesmart.in/" />
+    <meta property="og:image" content="https://villagesmart.in/logo.png" />
 
+    <!-- ================= TWITTER CARD ================= -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@lovable_dev" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta
+      name="twitter:title"
+      content="VillageMart – Fresh Vegetables, Fruits & Groceries Online"
+    />
+    <meta
+      name="twitter:description"
+      content="Buy fresh vegetables, fruits, groceries and garlands online. Fast village delivery with secure payments."
+    />
+    <meta name="twitter:image" content="https://villagesmart.in/logo.png" />
+
+    <!-- ================= STRUCTURED DATA (SCHEMA) ================= -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Store",
+        "name": "VillageMart",
+        "url": "https://villagesmart.in",
+        "logo": "https://villagesmart.in/logo.png",
+        "description": "Online grocery store delivering fresh vegetables, fruits, groceries and garlands to villages.",
+        "address": {
+          "@type": "PostalAddress",
+          "addressCountry": "IN"
+        },
+        "areaServed": "India",
+        "paymentAccepted": "UPI, Cash on Delivery",
+        "priceRange": "₹"
+      }
+    </script>
+
+    <!-- ================= FAVICON ================= -->
+    <link rel="icon" type="image/png" href="/favicon1.png" />
   </head>
 
   <body>
     <div id="root"></div>
+
+    <!-- ================= APP ENTRY ================= -->
     <script type="module" src="/src/main.tsx"></script>
+
+    <!-- ================= RAZORPAY ================= -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   </body>
 </html>

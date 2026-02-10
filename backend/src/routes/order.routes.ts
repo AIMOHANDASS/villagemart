@@ -1,27 +1,23 @@
 import express from "express";
-import Order from "../models/order.model";
+import {
+  createOrder,
+  getAllOrders,
+  getUserOrders,
+  confirmOrder,
+  updateOrderStatus,
+  adminCancelOrder,
+  userCancelOrder,
+} from "../controllers/order.controller";
 
 const router = express.Router();
 
-// GET all orders (Admin only)
-router.get("/", async (req, res) => {
-  try {
-    const orders = await Order.find();
-    res.json(orders);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch orders" });
-  }
-});
+router.post("/", createOrder);
+router.get("/", getAllOrders);
+router.get("/user/:userId", getUserOrders);
 
-// ADD new order (User checkout)
-router.post("/", async (req, res) => {
-  try {
-    const newOrder = new Order(req.body);
-    await newOrder.save();
-    res.status(201).json(newOrder);
-  } catch (err) {
-    res.status(400).json({ error: "Failed to place order" });
-  }
-});
+router.post("/confirm/:orderId", confirmOrder);
+router.post("/status/:orderId", updateOrderStatus);   // ✅ important
+router.post("/admin-cancel/:orderId", adminCancelOrder);
+router.post("/user-cancel/:orderId", userCancelOrder);
 
 export default router;

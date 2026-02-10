@@ -1,187 +1,354 @@
-// src/pages/AdminPanel.tsx
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { API_BASE_URL } from "../api";
 
-interface Purchase {
-  _id: string;
-  user: string;
-  items: string[];
-  status: string;
-}
+/* ================= TYPES ================= */
 
-interface Product {
-  _id?: string; // MongoDB _id
-  id: string;
-  name: string;
-  price: number;
+interface OrderItem {
+  product_name: string;
+  unit_price: number;     // ✅ NEW
+  weight: number;         // ✅ NEW
+  total_price: number;    // ✅ NEW
   image: string;
-  category: string;
-  rating: number;
-  reviews: number;
-  inStock: boolean;
-  isOrganic: boolean;
 }
+
+interface Order {
+  orderId: number;
+  username: string;
+  total_amount: number;
+  status: string;
+  tracking_status?: string;
+  cancel_reason?: string;
+  created_at: string;
+  items: OrderItem[];
+}
+
+/* ================= COMPONENT ================= */
 
 const AdminPanel: React.FC = () => {
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [formData, setFormData] = useState({
-    id: "",
-    name: "",
-    price: "",
-    image: "",
-    category: "",
-    rating: "",
-    reviews: "",
-    inStock: true,
-    isOrganic: false,
-  });
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Fetch purchases
-  const fetchPurchases = async () => {
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+
+  /* ---------------- FETCH ORDERS ---------------- */
+  const fetchOrders = async () => {
     try {
-      const res = await axios.get<Purchase[]>("http://localhost:5000/api/orders");
-      setPurchases(res.data);
+      const res = await axios.get<Order[]>(`${API_BASE_URL}/orders`);
+      setOrders(res.data || []);
     } catch (err) {
-      console.error("Error fetching purchases:", err);
+      console.error("❌ Error fetching orders:", err);
+      alert("❌ Failed to load orders");
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Fetch products
-  const fetchProducts = async () => {
-    try {
-      const res = await axios.get<Product[]>("http://localhost:5000/api/products");
-      setProducts(res.data);
-    } catch (err) {
-      console.error("Error fetching products:", err);
-    }
-  };
-
+  /* 🔁 AUTO REFRESH EVERY 8 SECONDS */
   useEffect(() => {
-    fetchPurchases();
-    fetchProducts();
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 8000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Handle input changes
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type, checked } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
-  };
+  /* ---------------- CONFIRM ORDER ---------------- */
+  const confirmOrder = async (orderId: number) => {
+    if (!orderId) return alert("Invalid order ID");
 
-  // Add new product
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
     try {
-      await axios.post("http://localhost:5000/api/products", {
-        ...formData,
-        price: Number(formData.price),
-        rating: Number(formData.rating) || 0,
-        reviews: Number(formData.reviews) || 0,
-      });
-      alert("✅ Product added successfully!");
-      setFormData({
-        id: "",
-        name: "",
-        price: "",
-        image: "",
-        category: "",
-        rating: "",
-        reviews: "",
-        inStock: true,
-        isOrganic: false,
-      });
-      fetchProducts();
-    } catch (err) {
-      console.error("Error adding product:", err);
-      alert("❌ Failed to add product");
+      setConfirmingId(orderId);
+
+      const res = await fetch(
+        `${API_BASE_URL}/orders/confirm/${orderId}`,
+        { method: "POST" }
+      );
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Confirm failed");
+
+      alert("✅ Order confirmed & mail sent");
+      fetchOrders();
+    } catch (error: any) {
+      console.error("❌ Confirm order failed:", error);
+      alert("❌ Confirm failed: " + error.message);
+    } finally {
+      setConfirmingId(null);
     }
   };
 
-  // Delete product
-  const handleDeleteProduct = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this product?")) return;
+  /* ---------------- UPDATE TRACKING STATUS ---------------- */
+  const updateStatus = async (orderId: number, status: string) => {
+    if (!orderId) return;
+
     try {
-      await axios.delete(`http://localhost:5000/api/products/${id}`);
-      alert("🗑️ Product deleted!");
-      fetchProducts();
+      setUpdatingId(orderId);
+
+      const res = await fetch(
+        `${API_BASE_URL}/orders/status/${orderId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        }
+      );
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Update failed");
+
+      fetchOrders();
     } catch (err) {
-      console.error("Error deleting product:", err);
+      console.error("❌ Status update failed:", err);
+      alert("❌ Failed to update status");
+    } finally {
+      setUpdatingId(null);
     }
   };
+
+  /* ---------------- ADMIN CANCEL ORDER ---------------- */
+  const cancelReasons = [
+    "More orders",
+    "Distance unavailable",
+    "Product not available",
+    "Wrong location",
+  ];
+
+  const cancelOrder = async (orderId: number, reason: string) => {
+    if (!reason) return;
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/orders/admin-cancel/${orderId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        }
+      );
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Cancel failed");
+
+      fetchOrders();
+    } catch (err) {
+      console.error("❌ Cancel failed:", err);
+      alert("❌ Failed to cancel order");
+    }
+  };
+
+  /* ---------------- STATUS COLOR ---------------- */
+  const getStatusColor = (status?: string) => {
+    const s = status?.toLowerCase();
+
+    switch (s) {
+      case "pending":
+        return "bg-yellow-100 text-yellow-800";
+      case "confirmed":
+        return "bg-green-100 text-green-800";
+      case "picked":
+        return "bg-blue-100 text-blue-800";
+      case "out_for_delivery":
+        return "bg-purple-100 text-purple-800";
+      case "delivered":
+        return "bg-emerald-100 text-emerald-800";
+      case "cancelled":
+        return "bg-red-100 text-red-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  /* ================= RENDER ================= */
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-8">
-      <h1 className="text-3xl font-bold">Admin Panel</h1>
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <h1 className="text-3xl font-bold text-gray-800">Admin Panel</h1>
 
-      {/* Purchases Section */}
-      <section>
-        <h2 className="text-xl font-semibold mb-2">User Purchases</h2>
-        <ul className="bg-white shadow rounded p-4 space-y-2">
-          {purchases.map((p) => (
-            <li key={p._id} className="border-b py-2">
-              <span className="font-medium">User:</span> {p.user} |{" "}
-              <span className="font-medium">Items:</span> {p.items.join(", ")} |{" "}
-              <span className="font-medium">Status:</span> {p.status}
-            </li>
-          ))}
-        </ul>
-      </section>
+      <Card className="shadow-lg">
+        <CardContent className="p-6">
+          <h2 className="text-xl font-semibold mb-4">Order Details</h2>
 
-      {/* Add Product Section */}
-      <section>
-        <h2 className="text-xl font-semibold mb-2">Add New Product</h2>
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white p-4 shadow rounded grid grid-cols-1 sm:grid-cols-2 gap-4"
-        >
-          <Input name="id" placeholder="ID" value={formData.id} onChange={handleChange} required />
-          <Input name="name" placeholder="Name" value={formData.name} onChange={handleChange} required />
-          <Input name="price" type="number" placeholder="Price" value={formData.price} onChange={handleChange} required />
-          <Input name="image" placeholder="Image URL" value={formData.image} onChange={handleChange} />
-          <Input name="category" placeholder="Category" value={formData.category} onChange={handleChange} />
-          <Input name="rating" type="number" placeholder="Rating" value={formData.rating} onChange={handleChange} />
-          <Input name="reviews" type="number" placeholder="Reviews" value={formData.reviews} onChange={handleChange} />
+          {loading ? (
+            <p className="text-gray-500">Loading orders...</p>
+          ) : orders.length === 0 ? (
+            <p className="text-gray-500">No orders found</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-100 text-left">
+                    <th className="p-3 border">Order ID</th>
+                    <th className="p-3 border">User</th>
+                    <th className="p-3 border">Items</th>
+                    <th className="p-3 border">Amount</th>
+                    <th className="p-3 border">Status</th>
+                    <th className="p-3 border">Date</th>
+                    <th className="p-3 border">Action</th>
+                  </tr>
+                </thead>
 
-          <label className="flex items-center gap-2">
-            <input type="checkbox" name="inStock" checked={formData.inStock} onChange={handleChange} />
-            In Stock
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" name="isOrganic" checked={formData.isOrganic} onChange={handleChange} />
-            Organic
-          </label>
+                <tbody>
+                  {orders.map((order) => {
+                    const displayStatus =
+                      order.tracking_status || order.status;
 
-          <Button type="submit" className="col-span-full">
-            ➕ Add Product
-          </Button>
-        </form>
-      </section>
+                    return (
+                      <tr
+                        key={order.orderId}
+                        className="hover:bg-gray-50 align-top"
+                      >
+                        {/* ORDER ID */}
+                        <td className="p-3 border font-medium">
+                          #{order.orderId}
+                        </td>
 
-      {/* Product List Section */}
-      <section>
-        <h2 className="text-xl font-semibold mb-2">Product List</h2>
-        <ul className="bg-white shadow rounded p-4 space-y-2">
-          {products.map((product) => (
-            <li key={product._id} className="flex justify-between items-center border-b py-2">
-              <span>
-                {product.name} — ₹{product.price} ({product.category})
-              </span>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleDeleteProduct(product._id!)}
-              >
-                Delete
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </section>
+                        {/* USER */}
+                        <td className="p-3 border">{order.username}</td>
+
+                        {/* ITEMS */}
+                        <td className="p-3 border min-w-[280px]">
+                          <div className="space-y-2">
+                            {order.items?.length > 0 ? (
+                              order.items.map((item, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center gap-3"
+                                >
+                                  <img
+                                    src={
+                                      item.image ||
+                                      "https://via.placeholder.com/40"
+                                    }
+                                    onError={(e) =>
+                                      ((e.target as HTMLImageElement).src =
+                                        "https://via.placeholder.com/40")
+                                    }
+                                    alt={item.product_name}
+                                    className="w-10 h-10 rounded object-cover border"
+                                  />
+
+                                  <div>
+                                    <p className="font-medium">
+                                      {item.product_name}
+                                    </p>
+
+                                    <p className="text-xs text-gray-500">
+                                      ₹{item.unit_price} × {item.weight}kg = ₹
+                                      {item.total_price}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-gray-400 italic">
+                                No items
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* AMOUNT */}
+                        <td className="p-3 border font-semibold">
+                          ₹{Number(order.total_amount || 0).toFixed(2)}
+                        </td>
+
+                        {/* STATUS */}
+                        <td className="p-3 border">
+                          <Badge className={getStatusColor(displayStatus)}>
+                            {displayStatus}
+                          </Badge>
+
+                          {order.cancel_reason && (
+                            <p className="text-xs text-red-600 mt-1">
+                              ❌ {order.cancel_reason}
+                            </p>
+                          )}
+                        </td>
+
+                        {/* DATE */}
+                        <td className="p-3 border text-gray-600">
+                          {new Date(order.created_at).toLocaleString()}
+                        </td>
+
+                        {/* ACTION */}
+                        <td className="p-3 border">
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              size="sm"
+                              disabled={
+                                confirmingId === order.orderId ||
+                                updatingId === order.orderId
+                              }
+                              onClick={() => confirmOrder(order.orderId)}
+                            >
+                              {confirmingId === order.orderId
+                                ? "Confirming..."
+                                : "Confirm"}
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              disabled={updatingId === order.orderId}
+                              onClick={() =>
+                                updateStatus(order.orderId, "PICKED")
+                              }
+                            >
+                              Pick
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              disabled={updatingId === order.orderId}
+                              onClick={() =>
+                                updateStatus(
+                                  order.orderId,
+                                  "OUT_FOR_DELIVERY"
+                                )
+                              }
+                            >
+                              Out
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              disabled={updatingId === order.orderId}
+                              onClick={() =>
+                                updateStatus(order.orderId, "DELIVERED")
+                              }
+                            >
+                              Delivered
+                            </Button>
+
+                            {/* CANCEL */}
+                            <select
+                              className="border p-1 rounded text-sm"
+                              defaultValue=""
+                              onChange={(e) => {
+                                cancelOrder(order.orderId, e.target.value);
+                                e.currentTarget.value = "";
+                              }}
+                            >
+                              <option value="">Cancel</option>
+                              {cancelReasons.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

@@ -1,29 +1,25 @@
 // src/pages/Products.tsx
 
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-// Note: Changed from 'axios' to standard 'fetch' for static file reading simulation
-// import axios from "axios"; 
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import Header from "@/components/Header";
 import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Filter, Search, X, ShoppingCart, CheckCircle, Info } from "lucide-react";
+import { ShoppingCart, CheckCircle, Info } from "lucide-react";
 
-// --- UPDATED TYPE DEFINITION (Fixed: ID is now string to match ProductCardProps expectation) ---
+/* ================= TYPES ================= */
+
 type Product = {
-  id: string; // FIX 2: Changed from number to string to resolve ProductCardProps incompatibility (code 2322)
+  id: string;
   name: string;
   price: number;
   image: string;
-  category: "Fruits" | "Vegetables" | "Groceries" | "Garlands"; 
-  rating: number; 
-  reviews: number; 
-  inStock: boolean; 
-  isOrganic: boolean; 
+  category: "Fruits" | "Vegetables" | "Groceries" | "Garlands" | "Dairy" | "Grains";
+  rating: number;
+  reviews: number;
+  inStock: boolean;
+  isOrganic: boolean;
 };
 
 type Props = {
@@ -33,280 +29,226 @@ type Props = {
 type Notification = {
   visible: boolean;
   productName: string;
-  action: 'added' | 'exists'; 
+  action: "added" | "exists";
 };
 
-// API_BASE_URL is only used for cart logic, not product fetching in this update
-const API_BASE_URL = "http://localhost:5000/api"; 
+/* ================= COMPONENT ================= */
 
 const Products: React.FC<Props> = ({ user }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const urlCategory = searchParams.get("category");
+  const urlSearch = (searchParams.get("search") || "").toLowerCase();
+
   const [products, setProducts] = useState<Product[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>("Groceries"); 
-  const [searchQuery, setSearchQuery] = useState("");
-  
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+
   const [notification, setNotification] = useState<Notification>({
     visible: false,
-    productName: '',
-    action: 'added',
+    productName: "",
+    action: "added",
   });
 
-  // --- CATEGORIES FOR FILTERING ---
-  const categories: { value: Product['category'] | "all"; label: string }[] = [
-    { value: "all", label: "All Categories" },
-    { value: "Groceries", label: "Groceries" },
-    { value: "Fruits", label: "Fruits" },
-    { value: "Vegetables", label: "Vegetables" },
-    { value: "Garlands", label: "Garlands" },
+  /* ================= CATEGORIES ================= */
+
+  const categories: { value: Product["category"] | "all"; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "Groceries", label: "🛒 Groceries" },
+    { value: "Dairy", label: "🥛 Dairy" },
+    { value: "Vegetables", label: "🥕 Vegetables" },
+    { value: "Fruits", label: "🍎 Fruits" },
+    { value: "Grains", label: "🌾 Grains" },
+    { value: "Garlands", label: "🌸 Garlands" },
   ];
 
-  // --- Fetching data from local path ---
-  const fetchProducts = async () => {
-    try {
-      const res = await fetch("/datadetails1.csv"); 
-      
-      if (!res.ok) {
-        throw new Error("Failed to load products file.");
-      }
-      
-      const csvText = await res.text();
-      const rows = csvText.split('\n').slice(1); 
-      
-      const parsedProducts: Product[] = rows.map((row, index) => {
-        const cols = row.split(',');
-        if (cols.length < 9) return null; 
-        
-        return {
-          // FIX 2: Convert ID to string here
-          id: cols[0].replace(/"/g, ''), 
-          name: cols[1].replace(/"/g, ''),
-          price: parseFloat(cols[2]),
-          image: cols[3].replace(/"/g, ''), 
-          category: cols[4] as Product['category'],
-          rating: parseFloat(cols[5]),
-          reviews: parseInt(cols[6]),
-          inStock: cols[7].toLowerCase() === 'true',
-          isOrganic: cols[8].toLowerCase() === 'true',
-        };
-      }).filter((item): item is Product => item !== null);
-
-      setProducts(parsedProducts);
-
-    } catch (err) {
-      console.error("Error fetching or parsing products:", err);
-      // Fallback or display error message
-    }
-  };
+  /* ================= HANDLE URL PARAMS ================= */
 
   useEffect(() => {
+    if (urlCategory) setSelectedCategory(urlCategory);
+    else setSelectedCategory("all");
+  }, [urlCategory]);
+
+  /* ================= FETCH PRODUCTS ================= */
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const res = await fetch("/datadetails1.csv");
+        if (!res.ok) throw new Error("Failed to load products file.");
+
+        const csvText = await res.text();
+        const rows = csvText.split("\n").slice(1);
+
+        const parsedProducts: Product[] = rows
+          .map((row) => {
+            const cols = row.split(",");
+            if (cols.length < 9) return null;
+
+            return {
+              id: cols[0]?.replace(/"/g, ""),
+              name: cols[1]?.replace(/"/g, ""),
+              price: parseFloat(cols[2]),
+              image: cols[3]?.replace(/"/g, ""),
+              category: cols[4] as Product["category"],
+              rating: parseFloat(cols[5]),
+              reviews: parseInt(cols[6]),
+              inStock: cols[7]?.toLowerCase() === "true",
+              isOrganic: cols[8]?.toLowerCase() === "true",
+            };
+          })
+          .filter((item): item is Product => item !== null);
+
+        setProducts(parsedProducts);
+      } catch (err) {
+        console.error("Error fetching products:", err);
+      }
+    };
+
     fetchProducts();
   }, []);
-  
 
-  const showNotification = (productName: string, action: 'added' | 'exists') => {
+  /* ================= FILTER + SORT ================= */
+
+  const filteredProducts = useMemo(() => {
+    let list = [...products];
+
+    if (urlSearch) {
+      const exact = list.filter((p) => p.name.toLowerCase() === urlSearch);
+
+      const relatedName = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(urlSearch) &&
+          p.name.toLowerCase() !== urlSearch
+      );
+
+      const relatedCategory = exact.length
+        ? list.filter(
+            (p) =>
+              p.category === exact[0].category &&
+              !p.name.toLowerCase().includes(urlSearch)
+          )
+        : [];
+
+      const mixed = [...relatedName, ...relatedCategory].sort(
+        () => 0.5 - Math.random()
+      );
+
+      return [...exact, ...mixed];
+    }
+
+    if (selectedCategory !== "all") {
+      list = list.filter(
+        (p) => p.category.toLowerCase() === selectedCategory.toLowerCase()
+      );
+    }
+
+    return list;
+  }, [products, selectedCategory, urlSearch]);
+
+  /* ================= CART LOGIC (GARLAND DELIVERY DATE) ================= */
+
+  const showNotification = (productName: string, action: "added" | "exists") => {
     setNotification({ visible: true, productName, action });
     setTimeout(() => {
-      setNotification(prev => ({ ...prev, visible: false }));
-    }, 2500); 
+      setNotification((prev) => ({ ...prev, visible: false }));
+    }, 2500);
   };
 
-  // --- FILTERING LOGIC ---
-  const filteredProducts = products.filter((product) => {
-    const matchesCategory = selectedCategory === "all" || product.category.toLowerCase() === selectedCategory.toLowerCase();
-    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
-  
-
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, deliveryDate?: string) => {
     const rawCart = localStorage.getItem("cart");
-    let cart: any[] = rawCart ? JSON.parse(rawCart) : []; 
+    let cart: any[] = rawCart ? JSON.parse(rawCart) : [];
 
     const existing = cart.find((item: any) => item.id === product.id);
-    
-    // FIX 1: Initial quantity logic updated to remove 'Dairy' check, 
-    // resolving the "types have no overlap" error (code 2367).
-    // Uses a sensible default of 'kg' or 'unit' based on product category type.
-    let initialUnit = 'unit'; // Default for non-weight items
-    if (product.category === 'Groceries') {
-      initialUnit = 'kg';
-    } else if (product.category === 'Fruits' || product.category === 'Vegetables') {
-        initialUnit = 'kg';
-    } else if (product.category === 'Garlands') {
-        initialUnit = 'unit';
-    }
-    
-    // Set a default quantity based on the unit
-    const initialQuantity = initialUnit === 'kg' ? 0.5 : 1; 
-    
-    let action: 'added' | 'exists';
+
+    let initialUnit = "unit";
+    if (product.category === "Groceries") initialUnit = "kg";
+    else if (product.category === "Fruits" || product.category === "Vegetables")
+      initialUnit = "kg";
+    else if (product.category === "Garlands") initialUnit = "unit";
+
+    const initialQuantity = initialUnit === "kg" ? 0.5 : 1;
+
+    let action: "added" | "exists";
 
     if (existing) {
-      // DO NOT MODIFY QUANTITY: Show exists notification
-      action = 'exists'; 
+      action = "exists";
     } else {
-      cart.push({ 
-        ...product, 
-        quantity: initialQuantity, 
-        unit: initialUnit 
+      cart.push({
+        ...product,
+        quantity: initialQuantity,
+        unit: initialUnit,
+        deliveryDate:
+          product.category === "Garlands" ? deliveryDate || null : null,
       });
-      action = 'added'; // New item added to cart
-    }
-    
-    if (action === 'added') {
-        localStorage.setItem("cart", JSON.stringify(cart));
-        window.dispatchEvent(new Event("storage")); 
+
+      localStorage.setItem("cart", JSON.stringify(cart));
+      window.dispatchEvent(new Event("storage"));
+      action = "added";
     }
 
     showNotification(product.name, action);
   };
 
-  // NotificationPopup component (Unchanged)
+  /* ================= POPUP ================= */
+
   const NotificationPopup = () => {
     if (!notification.visible) return null;
 
-    const isExists = notification.action === 'exists';
-    
+    const isExists = notification.action === "exists";
+
     return (
-        <>
-            <style>
-                {`
-                    @keyframes fadeInUp {
-                        from { opacity: 0; transform: translate(-50%, -40%); }
-                        to { opacity: 1; transform: translate(-50%, -50%); }
-                    }
-                `}
-            </style>
-            
-            <div 
-                className="
-                    fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
-                    bg-white p-6 rounded-xl shadow-2xl border-2 z-50 
-                    max-w-xs w-full text-center 
-                    transition-opacity duration-300
-                "
-                style={{ 
-                    borderColor: isExists ? '#f59e0b' : '#10b981', 
-                    animation: 'fadeInUp 0.3s ease-out'
-                }}
-            >
-                
-                {isExists ? (
-                    <Info className="h-8 w-8 text-yellow-600 mx-auto mb-3" />
-                ) : (
-                    <CheckCircle className="h-8 w-8 text-green-600 mx-auto mb-3" />
-                )}
+      <div
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 
+        bg-white p-6 rounded-xl shadow-2xl border-2 z-50 max-w-xs w-full text-center animate-in fade-in zoom-in"
+        style={{ borderColor: isExists ? "#f59e0b" : "#10b981" }}
+      >
+        {isExists ? (
+          <Info className="h-8 w-8 text-yellow-600 mx-auto mb-3" />
+        ) : (
+          <CheckCircle className="h-8 w-8 text-green-600 mx-auto mb-3" />
+        )}
 
-                <h3 className="text-lg font-bold text-gray-800 mb-1">
-                    {isExists ? 'Item Already in Cart!' : 'Added to Cart!'}
-                </h3>
-                <p className="text-sm text-gray-600">
-                    <span className="font-semibold">{notification.productName}</span> 
-                    {isExists ? ' is already in your cart.' : ' is ready for checkout.'}
-                </p>
+        <h3 className="text-lg font-bold mb-1">
+          {isExists ? "Item Already in Cart!" : "Added to Cart!"}
+        </h3>
 
-                <Button 
-                    size="sm"
-                    className="mt-4 bg-primary hover:bg-primary/90"
-                    onClick={() => navigate("/cart")}
-                >
-                    <ShoppingCart className="h-4 w-4 mr-2" />
-                    View Cart
-                </Button>
-            </div>
-        </>
+        <p className="text-sm text-gray-600">
+          <span className="font-semibold">{notification.productName}</span>{" "}
+          {isExists ? " is already in your cart." : " is ready for checkout."}
+        </p>
+
+        <Button size="sm" className="mt-4" onClick={() => navigate("/cart")}>
+          <ShoppingCart className="h-4 w-4 mr-2" />
+          View Cart
+        </Button>
+      </div>
     );
   };
 
+  /* ================= UI ================= */
 
   return (
-    <div className="min-h-screen bg-gray-50"> 
+    <div className="min-h-screen bg-gray-50">
       <Header user={user} />
-      
       <NotificationPopup />
 
-      {/* Filters + Search Section */}
-      <section className="py-8 bg-white shadow-sm border-b border-gray-200 sticky top-0 z-20">
-        <div className="container px-4">
-          
-          <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
-            <h1 className="text-3xl font-extrabold text-gray-800 hidden lg:block">Our Products</h1>
-            
-            <div className="relative flex-1 w-full lg:w-96">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <Input
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-11 py-6 h-12 rounded-xl border-gray-300 focus:border-blue-500 transition duration-200 shadow-sm" 
-              />
-              {searchQuery && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-8 w-8 p-0 text-gray-500 hover:text-gray-800"
-                  onClick={() => setSearchQuery("")}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="w-full sm:w-60 h-12 rounded-xl text-md font-medium shadow-sm border-gray-300 transition duration-200 hover:border-blue-500">
-                <Filter className="h-5 w-5 mr-2 text-blue-600" />
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((category) => (
-                  <SelectItem key={category.value} value={category.value}>
-                    {category.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            
-          </div>
-
-          <div className="flex flex-wrap gap-2 mt-4 pt-2">
-            {(selectedCategory !== "all" || searchQuery) && (
-              <span className="text-sm font-semibold text-gray-600 mr-2">
-                Active Filters:
-              </span>
-            )}
-            
-            {selectedCategory !== "all" && (
-              <Badge 
-                className="
-                  bg-blue-500 text-white 
-                  hover:bg-blue-600 
-                  py-1.5 px-3 text-sm 
-                  rounded-full gap-1 
-                  shadow-md
-                "
-              >
-                {categories.find((c) => c.value === selectedCategory)?.label}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto p-0 ml-1 text-white hover:bg-transparent hover:text-gray-100"
-                  onClick={() => setSelectedCategory("all")}
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-              </Badge>
-            )}
-            
-            {searchQuery && (
-              <Badge variant="secondary" className="py-1.5 px-3 text-sm rounded-full gap-1">
-                Search: "{searchQuery}"
-              </Badge>
-            )}
-          </div>
+      {/* CATEGORY BUTTONS */}
+      <section className="bg-white border-b py-4 sticky top-0 z-20">
+        <div className="container px-4 flex flex-wrap gap-3 justify-center">
+          {categories.map((cat) => (
+            <Button
+              key={cat.value}
+              variant={selectedCategory === cat.value ? "default" : "outline"}
+              onClick={() => navigate(`/products?category=${cat.value}`)}
+            >
+              {cat.label}
+            </Button>
+          ))}
         </div>
       </section>
 
-      {/* Products Grid */}
+      {/* PRODUCTS GRID */}
       <section className="py-12">
         <div className="container px-4">
           {filteredProducts.length > 0 ? (
@@ -315,14 +257,15 @@ const Products: React.FC<Props> = ({ user }) => {
                 <ProductCard
                   key={product.id}
                   {...product}
-                  onAddToCart={() => addToCart(product)}
+                  onAddToCart={(deliveryDate) =>
+                    addToCart(product, deliveryDate)
+                  }
                 />
               ))}
             </div>
           ) : (
             <p className="text-center text-xl text-gray-600 py-16">
-              <Search className="h-6 w-6 inline-block mr-2 text-gray-400" />
-              Sorry, no products match your search or filter criteria.
+              No products found.
             </p>
           )}
         </div>
