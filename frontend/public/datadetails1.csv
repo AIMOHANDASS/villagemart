@@ -1,0 +1,67 @@
+id,name,price,image,category,rating,reviews,inStock,isOrganic
+1,Ghee,21,https://cdn.shopify.com/s/files/1/0586/8234/3501/files/cow_desi_ghee_image.webp?v=1742634983,Groceries,4.5,100,TRUE,FALSE
+2,Urad Dal (Black Gram Dal),84,https://cdn.shopify.com/s/files/1/0627/8266/8969/files/Chana_Dal_480x480.webp?v=1705988578,Groceries,4.5,100,TRUE,FALSE
+3,Raw Rice,105,https://www.aramiyarkai.com/admin/images/blog/ponni-raw_BID53.webp,Groceries,4.5,100,TRUE,FALSE
+4,Sugar,53,https://i0.wp.com/vrmshoppe.com/wp-content/uploads/2021/05/white-sugar-500x500-1.jpg?fit=500%2C500&ssl=1,Groceries,4.5,100,TRUE,FALSE
+5,Toor Dal (Split Pigeon Pea),102,https://www.gosupps.com/media/catalog/product/8/1/81_x81KEFLL.jpg,Groceries,4.5,100,TRUE,FALSE
+6,Fenugreek,110,https://organicbazar.net/cdn/shop/products/Untitled-design-2022-06-02T160309.044.jpg?v=1756540403&width=1946,Groceries,4.5,100,TRUE,FALSE
+7,Mustard Seeds (Small),111,https://cdn.shopaccino.com/edible-smart/products/mustard-seeds-1579770498-5266794-271964_l.jpg?v=611?param=1,Groceries,4.5,100,TRUE,FALSE
+8,Black Pepper,110,https://img500.exportersindia.com/product_images/bc-500/2024/8/13659881/black-pepper-powder-1722486404-7545723.jpeg,Groceries,4.5,100,TRUE,FALSE
+9,White Pepper,54.5,https://www.ebaza.com.my/image/ebaza/image/cache/data/jW0t2zhy1696906966-748x498.jpg,Groceries,4.5,100,TRUE,FALSE
+10,Coriander Seeds,54.5,https://vibrantliving.in/cdn/shop/files/CorianderSeeds.png?v=1731059976&width=800,Groceries,4.5,100,TRUE,FALSE
+11,Turmeric Powder,54.5,http://content.health.harvard.edu/wp-content/uploads/2024/03/fa246ce0-054b-4892-bf30-5eb43cd938aa.jpg,Groceries,4.5,100,TRUE,FALSE
+12,Oil,210,https://5.imimg.com/data5/SELLER/Default/2023/7/327751453/BQ/UF/YZ/112155041/5-l-gold-winner-refined-sunflower-oil-1000x1000.jpeg,Groceries,4.5,100,TRUE,FALSE
+13,Coconut Oil,110,https://naturesbox.in/cdn/shop/products/Coconut-Oil-back_82eb07f5-397e-4302-9d27-18d9676f1fd9_540x.jpg?v=1673614342,Groceries,4.5,100,TRUE,FALSE
+14,Coffee Powder,62,https://m.media-amazon.com/images/I/71mdCt8pa-L._SL1500_.jpg,Groceries,4.5,100,TRUE,FALSE
+15,Garlic,85.5,https://plus.unsplash.com/premium_photo-1666270423754-5b66a5184cc3?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8Z2FybGljfGVufDB8fDB8fHww,Groceries,4.5,100,TRUE,FALSE
+16,Green Gram,87,https://pureandsure.in/cdn/shop/files/Green-gram-Whole-A.jpg?v=1727180752&width=700,Groceries,4.5,100,TRUE,FALSE
+17,Jaggery,22,https://orgfarm.store/cdn/shop/files/round-jaggery-500x500.jpg?v=1722456844&width=1500,Groceries,4.5,100,TRUE,FALSE
+18,Spices/Aromatics,112,https://www.alimentarium.org/sites/default/files/media/image/2016-10/shutterstock_mythja_epices_306621401_WEB_0.jpg,Groceries,4.5,100,TRUE,FALSE
+19,Asafoetida,36,https://m.media-amazon.com/images/I/71fwjIm8IsL._SL1280_.jpg,Groceries,4.5,100,TRUE,FALSE
+20,Cumin Seeds (Salt Sugar),26,https://as1.ftcdn.net/jpg/14/84/99/32/1000_F_1484993253_JtMMGDnOkoDgp7SBEHAtpJ80ohCEtNaC.webp,Groceries,4.5,100,TRUE,FALSE
+21,Chilli Powder,111,https://5.imimg.com/data5/SELLER/Default/2025/5/507905901/KM/OX/RS/100298487/chilly-powder-1000x1000.jpg,Groceries,4.5,100,TRUE,FALSE
+22,Coriander Powder,110,https://www.terraearthfood.com/cdn/shop/products/TerraCorianderPowder_1_1024x1024.jpg?v=1626012510,Groceries,4.5,100,TRUE,FALSE
+23,Groundnut Oil,130,https://www.tatasimplybetter.com/cdn/shop/files/01_1_2048x2048.png?v=1723024614,Groceries,4.5,100,TRUE,FALSE
+24,Ginger Garlic Paste,78,https://cdn3.foodviva.com/static-content/food-images/cooking-basics/ginger-garlic-paste/ginger-garlic-paste.jpg,Groceries,4.5,100,TRUE,FALSE
+25,Dried Chillies,128,https://vaaradhifarms.com/cdn/shop/files/5DryChilly.png?v=1730907059&width=1080,Groceries,4.5,100,TRUE,FALSE
+26,Groundnuts,74,https://m.media-amazon.com/images/I/41RoBZdJ+iL._SY300_SX300_QL70_FMwebp_.jpg,Groceries,4.5,100,TRUE,FALSE
+27,Wheat Flour,182,https://img500.exportersindia.com/product_images/bc-500/dir_174/5198785/wheat-flour-1508737546-3410055.jpeg,Groceries,4.5,100,TRUE,FALSE
+28,Onion,85,https://produits.bienmanger.com/36700-0w470h470_Organic_Red_Onion_From_Italy.jpg,Vegetables,4.5,100,TRUE,TRUE
+29,Beans,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/beans__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+30,Cabbages,40,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/cabbages-v2__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+31,Broccoli,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/broccoli__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+32,Capsicums ,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/capsicums__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+33,Beetroot,60,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/beetroot__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+34,Cauliflower,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/cauliflower__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+35,Ginger,20,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/ginger__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+36,Okra,40,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/okra__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+37,Potatoes,40,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/Potatoes-v2__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+38,Pumpkins,30,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/pumpkins__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+39,Sweet corn,60,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/sweet-corn__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+40,Tomatoes,50,https://www.vegetables.co.nz/assets/Vegetables-co-nz/Vegetables/tomato__FitMaxWzYxNSw2MTVd.jpg,Vegetables,4.5,100,TRUE,TRUE
+41,Banana,30,https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D,Fruits,4,100,TRUE,TRUE
+42,Pinapple,50,https://images.unsplash.com/photo-1550258987-190a2d41a8ba?q=80&w=687&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D,Fruits,4,100,TRUE,TRUE
+43,Apple,80,https://i.pinimg.com/736x/50/6b/4e/506b4ed1f20085d68b8b4f403bb110d4.jpg,Fruits,4,100,TRUE,TRUE
+44,Grapes,70,https://i.pinimg.com/736x/93/90/e6/9390e6cd144f89705ab95dcb0c60fb41.jpg,Fruits,4,100,TRUE,TRUE
+45,Pomegranate,70,https://i.pinimg.com/736x/f6/a9/68/f6a968adcd154632a6d2d97ba1404ae4.jpg,Fruits,4,100,TRUE,TRUE
+46,guava,70,https://i.pinimg.com/736x/ce/7e/9d/ce7e9db3393c4327111b05ac07dabee6.jpg,Fruits,4,100,TRUE,TRUE
+47,Mango,70,https://i.pinimg.com/736x/ab/64/1c/ab641caad9dce65ab2dda9f4171b0f63.jpg,Fruits,4,100,TRUE,TRUE
+48,Orange,80,https://i.pinimg.com/1200x/8d/cf/e2/8dcfe2a785ba01c4b3995ac18005402d.jpg,Fruits,4,100,TRUE,TRUE
+49,Watermelon,50,https://i.pinimg.com/736x/bd/25/07/bd2507eef8fda01f9fb7544a10861509.jpg,Fruits,4,100,TRUE,TRUE
+50,Dragon Fruit,60,https://i.pinimg.com/736x/33/cd/64/33cd6497e99dcfebb84a6271644de7de.jpg,Fruits,4,100,TRUE,TRUE
+51,Chikoo,60,https://i.pinimg.com/1200x/30/51/c6/3051c6a20513d06e95618d2f0f672de4.jpg,Fruits,4,100,TRUE,TRUE
+52,sitaphal,60,https://i.pinimg.com/736x/79/c3/71/79c3714c888377a0a18d02c854335e8a.jpg,Fruits,4,100,TRUE,TRUE
+53,Rambutan,80,https://i.pinimg.com/736x/ef/84/e4/ef84e40ce87d22d8472942c002bf1f44.jpg,Fruits,4,100,TRUE,TRUE
+54,Lotus,4000,https://i.pinimg.com/736x/35/39/d0/3539d08287a4eaa38f422738ae588e65.jpg,Garlands,4,100,TRUE,TRUE
+55,Rose,5000,https://i.pinimg.com/736x/5d/55/8f/5d558f9136c5e02d828725ac4d4124d1.jpg,Garlands,4,100,TRUE,TRUE
+56,Rose Pedals,6000,https://i.pinimg.com/736x/14/42/8c/14428c75b6436f1943ecd5aec96f9c1d.jpg,Garlands,4,100,TRUE,TRUE
+57,Lotus&Nanthiyavattai,5000,https://i.pinimg.com/736x/c1/fb/b5/c1fbb543e0c12a11bbdb8436252541ed.jpg,Garlands,4,100,TRUE,TRUE
+58,Pedals&Jamangi,5000,https://i.pinimg.com/736x/d8/23/3b/d8233b11818cf0d483d53fe591921f62.jpg,Garlands,4,100,TRUE,TRUE
+59,Nanthiyavattai dot type,6000,https://i.pinimg.com/1200x/aa/02/3a/aa023a2cbee4798f264bb2730891b57d.jpg,Garlands,4,100,TRUE,TRUE
+60,Nanthiyavattai role type,5000,https://i.pinimg.com/736x/ff/44/e3/ff44e389d5f5ce146a6b4c4ba2616a7e.jpg,Garlands,4,100,TRUE,TRUE
+61,Pedals role type,6000,https://i.pinimg.com/736x/3a/c2/a7/3ac2a7de308951264210e3a18a380951.jpg,Garlands,4,100,TRUE,TRUE
+62,Nanthiyavattai & Pedals,5000,https://i.pinimg.com/1200x/e0/c2/4e/e0c24ec51e72f4f97bac88ad22c4a640.jpg,Garlands,4,100,TRUE,TRUE
+63,Jamangi,4000,https://i.pinimg.com/736x/86/38/7e/86387eb05ed5e60821ffe4c266150c0c.jpg,Garlands,4,100,TRUE,TRUE
+64,Jamangi & Pedals,5000,https://i.pinimg.com/1200x/19/06/e1/1906e1fa7919d89f4009d58adce28f3b.jpg,Garlands,4,100,TRUE,TRUE
+65,Nanthiyavattai,5000,https://i.pinimg.com/1200x/40/31/0f/40310f609c1fda153517e6ee0bc9b490.jpg,Garlands,4,100,TRUE,TRUE
+66,Pedals with valai type,6000,https://i.pinimg.com/736x/82/30/1c/82301c11d147a996dd8dc5b1b106a040.jpg,Garlands,4,100,TRUE,TRUE

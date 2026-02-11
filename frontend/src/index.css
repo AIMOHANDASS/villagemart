@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   EXISTING GLOBAL COLOR VARIABLES (DO NOT CHANGE)
+========================================================= */
+:root {
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --accent: #2563eb;
+  --border: #e5e7eb;
+}
+
+.dark {
+  --bg-main: #0b1220;        /* dark navy */
+  --bg-card: #111827;        /* card dark */
+  --text-main: #e5e7eb;
+  --text-muted: #9ca3af;
+  --accent: #3b82f6;
+  --border: #1f2933;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  transition: background 0.3s, color 0.3s;
+}
+
+/* =========================================================
+   NEW DESIGN SYSTEM (HSL – ADD ONLY)
+========================================================= */
+
+@layer base {
+  :root {
+    /* ---- Base semantic tokens ---- */
+    --background: 28 100% 99%;
+    --foreground: 155 30% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 155 30% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 155 30% 15%;
+
+    --primary: 155 65% 25%;
+    --primary-foreground: 28 100% 99%;
+
+    --secondary: 45 90% 65%;
+    --secondary-foreground: 155 30% 15%;
+
+    --muted: 45 30% 95%;
+    --muted-foreground: 155 20% 45%;
+
+    --accent-hsl: 45 90% 65%;
+    --accent-foreground: 155 30% 15%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border-hsl: 45 25% 88%;
+    --input: 45 25% 94%;
+    --ring: 155 65% 25%;
+
+    /* ---- VillageMart Brand ---- */
+    --village-green: 155 65% 25%;
+    --village-green-light: 155 45% 35%;
+    --village-gold: 45 90% 65%;
+    --village-gold-dark: 45 85% 55%;
+    --village-earth: 28 35% 85%;
+    --village-earth-dark: 28 25% 65%;
+
+    /* ---- Gradients ---- */
+    --gradient-hero: linear-gradient(
+      135deg,
+      hsl(155 65% 25%),
+      hsl(155 45% 35%)
+    );
+
+    --gradient-warm: linear-gradient(
+      135deg,
+      hsl(45 90% 75%),
+      hsl(45 85% 65%)
+    );
+
+    --gradient-earth: linear-gradient(
+      180deg,
+      hsl(28 100% 99%),
+      hsl(28 35% 95%)
+    );
+
+    /* ---- Shadows ---- */
+    --shadow-soft: 0 4px 20px hsl(155 65% 25% / 0.1);
+    --shadow-card: 0 2px 10px hsl(155 65% 25% / 0.08);
+    --shadow-gold: 0 4px 15px hsl(45 90% 65% / 0.3);
+
+    --radius: 0.75rem;
+  }
+
+  /* ---------------- DARK MODE (DESIGN SYSTEM) ---------------- */
+  .dark {
+    --background: 220 35% 7%;
+    --foreground: 210 40% 96%;
+
+    --card: 220 30% 10%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 220 30% 10%;
+    --popover-foreground: 210 40% 96%;
+
+    --primary: 210 40% 96%;
+    --primary-foreground: 220 35% 7%;
+
+    --secondary: 217 25% 18%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 217 25% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent-hsl: 45 90% 65%;
+    --accent-foreground: 210 40% 96%;
+
+    --destructive: 0 62% 35%;
+    --destructive-foreground: 210 40% 96%;
+
+    --border-hsl: 217 25% 18%;
+    --input: 217 25% 18%;
+    --ring: 212 30% 83%;
+  }
+}
+
+/* =========================================================
+   TAILWIND BASE BINDING (SAFE)
+========================================================= */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
