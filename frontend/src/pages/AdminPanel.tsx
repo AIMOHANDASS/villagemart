@@ -30,6 +30,37 @@ interface Order {
   items: OrderItem[];
 }
 
+interface TransportBooking {
+  id: number;
+  username: string;
+  customer_name: string;
+  customer_phone: string;
+  from_address: string;
+  to_address: string;
+  distance_km: number;
+  charge_amount: number;
+  status: string;
+  created_at: string;
+}
+
+interface PartyHallBooking {
+  id: number;
+  username: string;
+  customer_name: string;
+  customer_phone: string;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  person_count: number;
+  snacks_count: number;
+  water_count: number;
+  cake_count: number;
+  add_ons_json?: string;
+  total_charge: number;
+  status: string;
+  created_at: string;
+}
+
 const cancelReasons = [
   "More orders",
   "Distance unavailable",
@@ -77,6 +108,8 @@ const getHoursLeft = (value?: string) => {
 const AdminPanel: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [garlandOrders, setGarlandOrders] = useState<Order[]>([]);
+  const [transportBookings, setTransportBookings] = useState<TransportBooking[]>([]);
+  const [partyHallBookings, setPartyHallBookings] = useState<PartyHallBooking[]>([]);
 
   const garlandOrderIds = useMemo(
     () => new Set(garlandOrders.map((o) => o.orderId)),
@@ -87,6 +120,7 @@ const AdminPanel: React.FC = () => {
     () => orders.filter((o) => !garlandOrderIds.has(o.orderId)),
     [orders, garlandOrderIds]
   );
+
   const [loading, setLoading] = useState(true);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
@@ -94,16 +128,25 @@ const AdminPanel: React.FC = () => {
 
   const fetchOrders = async () => {
     try {
-      const [allOrdersRes, garlandOrdersRes] = await Promise.all([
+      const [
+        allOrdersRes,
+        garlandOrdersRes,
+        transportRes,
+        partyHallRes,
+      ] = await Promise.all([
         axios.get<Order[]>(`${API_BASE_URL}/orders`),
         axios.get<Order[]>(`${API_BASE_URL}/orders/garland`),
+        axios.get<TransportBooking[]>(`${API_BASE_URL}/transport`),
+        axios.get<PartyHallBooking[]>(`${API_BASE_URL}/party-hall`),
       ]);
 
       setOrders(allOrdersRes.data || []);
       setGarlandOrders(garlandOrdersRes.data || []);
+      setTransportBookings(transportRes.data || []);
+      setPartyHallBookings(partyHallRes.data || []);
     } catch (err) {
-      console.error("❌ Error fetching orders:", err);
-      alert("❌ Failed to load orders");
+      console.error("❌ Error fetching admin data:", err);
+      alert("❌ Failed to load admin data");
     } finally {
       setLoading(false);
     }
@@ -407,6 +450,97 @@ const AdminPanel: React.FC = () => {
     </Card>
   );
 
+  const renderTransportTable = () => (
+    <Card className="shadow-lg">
+      <CardContent className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Transport Bookings</h2>
+        {loading ? (
+          <p className="text-gray-500">Loading transport bookings...</p>
+        ) : transportBookings.length === 0 ? (
+          <p className="text-gray-500">No transport bookings found</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-3 border">ID</th>
+                  <th className="p-3 border">User</th>
+                  <th className="p-3 border">From</th>
+                  <th className="p-3 border">To</th>
+                  <th className="p-3 border">KM</th>
+                  <th className="p-3 border">Charge</th>
+                  <th className="p-3 border">Phone</th>
+                  <th className="p-3 border">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transportBookings.map((b) => (
+                  <tr key={b.id} className="hover:bg-gray-50 align-top">
+                    <td className="p-3 border">#{b.id}</td>
+                    <td className="p-3 border">{b.username || b.customer_name}</td>
+                    <td className="p-3 border">{b.from_address}</td>
+                    <td className="p-3 border">{b.to_address}</td>
+                    <td className="p-3 border">{Number(b.distance_km).toFixed(2)}</td>
+                    <td className="p-3 border font-semibold">₹{Number(b.charge_amount).toFixed(2)}</td>
+                    <td className="p-3 border">{b.customer_phone}</td>
+                    <td className="p-3 border">{formatDate(b.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const renderPartyHallTable = () => (
+    <Card className="shadow-lg">
+      <CardContent className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Party Hall Bookings (3hr)</h2>
+        {loading ? (
+          <p className="text-gray-500">Loading party hall bookings...</p>
+        ) : partyHallBookings.length === 0 ? (
+          <p className="text-gray-500">No party hall bookings found</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-3 border">ID</th>
+                  <th className="p-3 border">User</th>
+                  <th className="p-3 border">Event</th>
+                  <th className="p-3 border">Persons</th>
+                  <th className="p-3 border">Snacks/Water/Cake</th>
+                  <th className="p-3 border">Services</th>
+                  <th className="p-3 border">Total</th>
+                  <th className="p-3 border">Phone</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partyHallBookings.map((b) => (
+                  <tr key={b.id} className="hover:bg-gray-50 align-top">
+                    <td className="p-3 border">#{b.id}</td>
+                    <td className="p-3 border">{b.username || b.customer_name}</td>
+                    <td className="p-3 border">
+                      <p>{b.event_date}</p>
+                      <p className="text-xs">{String(b.start_time).slice(0, 5)} - {String(b.end_time).slice(0, 5)}</p>
+                    </td>
+                    <td className="p-3 border">{b.person_count}</td>
+                    <td className="p-3 border">{b.snacks_count}/{b.water_count}/{b.cake_count}</td>
+                    <td className="p-3 border">{b.add_ons_json ? JSON.parse(b.add_ons_json).join(", ") : "-"}</td>
+                    <td className="p-3 border font-semibold">₹{Number(b.total_charge).toFixed(2)}</td>
+                    <td className="p-3 border">{b.customer_phone}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <h1 className="text-3xl font-bold text-gray-800">Admin Panel</h1>
@@ -416,6 +550,8 @@ const AdminPanel: React.FC = () => {
         garlandOrders,
         true
       )}
+      {renderTransportTable()}
+      {renderPartyHallTable()}
     </div>
   );
 };
