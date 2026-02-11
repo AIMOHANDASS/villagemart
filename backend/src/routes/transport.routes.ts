@@ -3,6 +3,7 @@ import {
   createTransportBooking,
   getAllTransportBookings,
   getUserTransportBookings,
+  confirmTransportBooking,
 } from "../controllers/transport.controller";
 
 const router = express.Router();
@@ -10,5 +11,6 @@ const router = express.Router();
 router.post("/book", createTransportBooking);
 router.get("/", getAllTransportBookings);
 router.get("/user/:userId", getUserTransportBookings);
+router.post("/confirm/:bookingId", confirmTransportBooking);
 
 export default router;

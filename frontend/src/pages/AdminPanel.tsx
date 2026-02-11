@@ -36,10 +36,15 @@ interface TransportBooking {
   customer_name: string;
   customer_phone: string;
   from_address: string;
+  from_lat?: number;
+  from_lng?: number;
   to_address: string;
+  to_lat?: number;
+  to_lng?: number;
   distance_km: number;
   charge_amount: number;
   status: string;
+  notes?: string;
   created_at: string;
 }
 
@@ -56,6 +61,7 @@ interface PartyHallBooking {
   water_count: number;
   cake_count: number;
   add_ons_json?: string;
+  notes?: string;
   total_charge: number;
   status: string;
   created_at: string;
@@ -97,6 +103,16 @@ const formatDate = (value?: string) => {
 const getCurrentStatus = (order: Order) =>
   (order.tracking_status || order.status || "").toUpperCase();
 
+const parseAddOns = (value?: string) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_err) {
+    return [];
+  }
+};
+
 const getHoursLeft = (value?: string) => {
   if (!value) return null;
   const target = new Date(value).getTime();
@@ -125,27 +141,28 @@ const AdminPanel: React.FC = () => {
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [remindingId, setRemindingId] = useState<number | null>(null);
+  const [confirmingTransportId, setConfirmingTransportId] = useState<number | null>(null);
+  const [confirmingPartyHallId, setConfirmingPartyHallId] = useState<number | null>(null);
 
   const fetchOrders = async () => {
     try {
-      const [
-        allOrdersRes,
-        garlandOrdersRes,
-        transportRes,
-        partyHallRes,
-      ] = await Promise.all([
-        axios.get<Order[]>(`${API_BASE_URL}/orders`),
-        axios.get<Order[]>(`${API_BASE_URL}/orders/garland`),
-        axios.get<TransportBooking[]>(`${API_BASE_URL}/transport`),
-        axios.get<PartyHallBooking[]>(`${API_BASE_URL}/party-hall`),
-      ]);
+      const adminRes = await axios.get<{
+        orders: Order[];
+        garlandOrders: Order[];
+        transportBookings: TransportBooking[];
+        partyHallBookings: PartyHallBooking[];
+      }>(`${API_BASE_URL}/orders/admin/panel-data`);
 
-      setOrders(allOrdersRes.data || []);
-      setGarlandOrders(garlandOrdersRes.data || []);
-      setTransportBookings(transportRes.data || []);
-      setPartyHallBookings(partyHallRes.data || []);
+      setOrders(adminRes.data?.orders || []);
+      setGarlandOrders(adminRes.data?.garlandOrders || []);
+      setTransportBookings(adminRes.data?.transportBookings || []);
+      setPartyHallBookings(adminRes.data?.partyHallBookings || []);
     } catch (err) {
       console.error("❌ Error fetching admin data:", err);
+      setOrders([]);
+      setGarlandOrders([]);
+      setTransportBookings([]);
+      setPartyHallBookings([]);
       alert("❌ Failed to load admin data");
     } finally {
       setLoading(false);
@@ -248,6 +265,37 @@ const AdminPanel: React.FC = () => {
       alert(`❌ ${message}`);
     } finally {
       setRemindingId(null);
+    }
+  };
+
+
+  const confirmTransportBooking = async (bookingId: number) => {
+    try {
+      setConfirmingTransportId(bookingId);
+      const res = await fetch(`${API_BASE_URL}/transport/confirm/${bookingId}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Transport confirm failed");
+      await fetchOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Transport confirm failed";
+      alert(`❌ ${message}`);
+    } finally {
+      setConfirmingTransportId(null);
+    }
+  };
+
+  const confirmPartyHallBooking = async (bookingId: number) => {
+    try {
+      setConfirmingPartyHallId(bookingId);
+      const res = await fetch(`${API_BASE_URL}/party-hall/confirm/${bookingId}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Party hall confirm failed");
+      await fetchOrders();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Party hall confirm failed";
+      alert(`❌ ${message}`);
+    } finally {
+      setConfirmingPartyHallId(null);
     }
   };
 
@@ -470,7 +518,10 @@ const AdminPanel: React.FC = () => {
                   <th className="p-3 border">KM</th>
                   <th className="p-3 border">Charge</th>
                   <th className="p-3 border">Phone</th>
+                  <th className="p-3 border">Status</th>
+                  <th className="p-3 border">Notes</th>
                   <th className="p-3 border">Date</th>
+                  <th className="p-3 border">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -483,7 +534,18 @@ const AdminPanel: React.FC = () => {
                     <td className="p-3 border">{Number(b.distance_km).toFixed(2)}</td>
                     <td className="p-3 border font-semibold">₹{Number(b.charge_amount).toFixed(2)}</td>
                     <td className="p-3 border">{b.customer_phone}</td>
+                    <td className="p-3 border"><Badge className={getStatusColor(b.status)}>{b.status}</Badge></td>
+                    <td className="p-3 border">{b.notes || "-"}</td>
                     <td className="p-3 border">{formatDate(b.created_at)}</td>
+                    <td className="p-3 border">
+                      <Button
+                        size="sm"
+                        disabled={String(b.status || "").toUpperCase() === "CONFIRMED" || confirmingTransportId === b.id}
+                        onClick={() => confirmTransportBooking(b.id)}
+                      >
+                        {confirmingTransportId === b.id ? "Confirming..." : "Confirm"}
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -515,6 +577,9 @@ const AdminPanel: React.FC = () => {
                   <th className="p-3 border">Services</th>
                   <th className="p-3 border">Total</th>
                   <th className="p-3 border">Phone</th>
+                  <th className="p-3 border">Notes</th>
+                  <th className="p-3 border">Status</th>
+                  <th className="p-3 border">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -528,9 +593,20 @@ const AdminPanel: React.FC = () => {
                     </td>
                     <td className="p-3 border">{b.person_count}</td>
                     <td className="p-3 border">{b.snacks_count}/{b.water_count}/{b.cake_count}</td>
-                    <td className="p-3 border">{b.add_ons_json ? JSON.parse(b.add_ons_json).join(", ") : "-"}</td>
+                    <td className="p-3 border">{parseAddOns(b.add_ons_json).join(", ") || "-"}</td>
                     <td className="p-3 border font-semibold">₹{Number(b.total_charge).toFixed(2)}</td>
                     <td className="p-3 border">{b.customer_phone}</td>
+                    <td className="p-3 border">{b.notes || "-"}</td>
+                    <td className="p-3 border"><Badge className={getStatusColor(b.status)}>{b.status}</Badge></td>
+                    <td className="p-3 border">
+                      <Button
+                        size="sm"
+                        disabled={String(b.status || "").toUpperCase() === "CONFIRMED" || confirmingPartyHallId === b.id}
+                        onClick={() => confirmPartyHallBooking(b.id)}
+                      >
+                        {confirmingPartyHallId === b.id ? "Confirming..." : "Confirm"}
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -1,9 +1,19 @@
 import { Request, Response } from "express";
 import db from "../db";
+import nodemailer from "nodemailer";
 
 const PARTY_HALL_BASE_CHARGE = 700;
 const PARTY_HALL_DURATION_HOURS = 3;
-const SUPPORT_NUMBER = "+91 8903003808";
+const SUPPORT_NUMBER = "91+ 8903003808";
+
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 const addOnPriceMap: Record<string, number> = {
   water: 5,
@@ -300,5 +310,75 @@ export const getUserPartyHallBookings = (req: Request, res: Response) => {
     }
 
     return res.json(rows || []);
+  });
+};
+
+export const confirmPartyHallBooking = (req: Request, res: Response) => {
+  const bookingId = Number(req.params.bookingId);
+  if (!bookingId) return res.status(400).json({ message: "Invalid booking id" });
+
+  const sql = `
+    SELECT ph.*, u.email, u.username
+    FROM party_hall_bookings ph
+    JOIN users u ON u.id = ph.user_id
+    WHERE ph.id = ?
+    LIMIT 1
+  `;
+
+  db.query(sql, [bookingId], (err: any, rows: any[]) => {
+    if (err || !rows?.length) {
+      console.error("❌ confirmPartyHallBooking fetch error:", err);
+      return res.status(404).json({ message: "Party hall booking not found" });
+    }
+
+    const row = rows[0];
+    if (String(row.status).toUpperCase() === "CONFIRMED") {
+      return res.status(409).json({ message: "Party hall booking already confirmed" });
+    }
+
+    db.query(
+      "UPDATE party_hall_bookings SET status='CONFIRMED' WHERE id=?",
+      [bookingId],
+      (updateErr: any) => {
+        if (updateErr) {
+          console.error("❌ confirmPartyHallBooking update error:", updateErr);
+          return res.status(500).json({ message: "Failed to confirm party hall booking" });
+        }
+
+        db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+          Number(row.user_id),
+          `✅ Party hall booking #${bookingId} confirmed by admin`,
+        ]);
+
+        const userMail = row.email;
+        const adminMail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+        const mailHtml = `
+          <p>Hi ${row.username || row.customer_name},</p>
+          <p>Your party hall booking <b>#${bookingId}</b> is confirmed.</p>
+          <p><b>Date:</b> ${row.event_date}<br/><b>Time:</b> ${row.start_time} - ${row.end_time}</p>
+          <p><b>Persons:</b> ${row.person_count}<br/><b>Total Charge:</b> ₹${Number(row.total_charge).toFixed(2)}</p>
+          <p>For clarification: ${SUPPORT_NUMBER}</p>
+        `;
+
+        Promise.all([
+          userMail
+            ? transporter.sendMail({
+                to: userMail,
+                subject: `Party Hall Booking Confirmed (#${bookingId})`,
+                html: mailHtml,
+              })
+            : Promise.resolve(),
+          adminMail
+            ? transporter.sendMail({
+                to: adminMail,
+                subject: `Admin Copy: Party Hall Confirmed (#${bookingId})`,
+                html: `<p>Party hall booking #${bookingId} confirmed for ${row.username || row.customer_name}.</p>`,
+              })
+            : Promise.resolve(),
+        ]).catch((mailErr) => console.error("❌ party hall confirm mail error:", mailErr));
+
+        return res.json({ success: true });
+      }
+    );
   });
 };

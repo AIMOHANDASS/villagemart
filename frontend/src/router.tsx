@@ -44,8 +44,22 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin }) => {
 
       {/* ================= PUBLIC ROUTES ================= */}
       <Route path="/" element={<Home user={user} />} />
-      <Route path="/transport" element={<Transport user={user} />} />
-      <Route path="/party-hall" element={<PartyHall user={user} />} />
+      <Route
+        path="/transport"
+        element={
+          <PrivateRoute>
+            <Transport user={user} />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/party-hall"
+        element={
+          <PrivateRoute>
+            <PartyHall user={user} />
+          </PrivateRoute>
+        }
+      />
       <Route path="/signup" element={<Signup onLogin={onLogin} />} />
       <Route path="/login" element={<Login onLogin={onLogin} />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />

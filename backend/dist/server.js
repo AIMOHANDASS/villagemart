@@ -12,6 +12,8 @@ const emailOtp_routes_1 = __importDefault(require("./routes/emailOtp.routes"));
 const forgotPassword_routes_1 = __importDefault(require("./routes/forgotPassword.routes"));
 const googleAuth_routes_1 = __importDefault(require("./routes/googleAuth.routes"));
 const profile_routes_1 = __importDefault(require("./routes/profile.routes"));
+const transport_routes_1 = __importDefault(require("./routes/transport.routes"));
+const partyHall_routes_1 = __importDefault(require("./routes/partyHall.routes"));
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
@@ -22,6 +24,8 @@ app.use("/api/email", emailOtp_routes_1.default);
 app.use("/api/auth", forgotPassword_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);
 app.use("/api/profile", profile_routes_1.default);
+app.use("/api/transport", transport_routes_1.default);
+app.use("/api/party-hall", partyHall_routes_1.default);
 app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
 });

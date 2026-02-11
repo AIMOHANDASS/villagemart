@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import db from "../db";
+import nodemailer from "nodemailer";
 
 type Coordinates = {
   lat: number;
@@ -7,6 +8,14 @@ type Coordinates = {
 };
 
 const TRANSPORT_RATE_PER_KM = 15;
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 db.query(
   `
@@ -39,7 +48,6 @@ db.query(
 );
 
 const toNum = (value: any) => Number(value);
-
 const isFiniteNum = (value: any) => Number.isFinite(toNum(value));
 
 const haversineKm = (from: Coordinates, to: Coordinates) => {
@@ -150,7 +158,11 @@ export const getAllTransportBookings = (req: Request, res: Response) => {
       tb.customer_name,
       tb.customer_phone,
       tb.from_address,
+      tb.from_lat,
+      tb.from_lng,
       tb.to_address,
+      tb.to_lat,
+      tb.to_lng,
       tb.distance_km,
       tb.charge_amount,
       tb.status,
@@ -202,5 +214,74 @@ export const getUserTransportBookings = (req: Request, res: Response) => {
     }
 
     return res.json(rows || []);
+  });
+};
+
+export const confirmTransportBooking = (req: Request, res: Response) => {
+  const bookingId = Number(req.params.bookingId);
+  if (!bookingId) return res.status(400).json({ message: "Invalid booking id" });
+
+  const sql = `
+    SELECT tb.*, u.email, u.username
+    FROM transport_bookings tb
+    JOIN users u ON u.id = tb.user_id
+    WHERE tb.id = ?
+    LIMIT 1
+  `;
+
+  db.query(sql, [bookingId], (err: any, rows: any[]) => {
+    if (err || !rows?.length) {
+      console.error("❌ confirmTransportBooking fetch error:", err);
+      return res.status(404).json({ message: "Transport booking not found" });
+    }
+
+    const row = rows[0];
+    if (String(row.status).toUpperCase() === "CONFIRMED") {
+      return res.status(409).json({ message: "Transport booking already confirmed" });
+    }
+
+    db.query(
+      "UPDATE transport_bookings SET status='CONFIRMED' WHERE id=?",
+      [bookingId],
+      (updateErr: any) => {
+        if (updateErr) {
+          console.error("❌ confirmTransportBooking update error:", updateErr);
+          return res.status(500).json({ message: "Failed to confirm transport booking" });
+        }
+
+        db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+          Number(row.user_id),
+          `✅ Transport booking #${bookingId} confirmed by admin`,
+        ]);
+
+        const userMail = row.email;
+        const adminMail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
+        const mailHtml = `
+          <p>Hi ${row.username || row.customer_name},</p>
+          <p>Your transport booking <b>#${bookingId}</b> is confirmed.</p>
+          <p><b>From:</b> ${row.from_address}<br/><b>To:</b> ${row.to_address}</p>
+          <p><b>Distance:</b> ${Number(row.distance_km).toFixed(2)} km<br/><b>Charge:</b> ₹${Number(row.charge_amount).toFixed(2)}</p>
+        `;
+
+        Promise.all([
+          userMail
+            ? transporter.sendMail({
+                to: userMail,
+                subject: `Transport Booking Confirmed (#${bookingId})`,
+                html: mailHtml,
+              })
+            : Promise.resolve(),
+          adminMail
+            ? transporter.sendMail({
+                to: adminMail,
+                subject: `Admin Copy: Transport Confirmed (#${bookingId})`,
+                html: `<p>Transport booking #${bookingId} confirmed for ${row.username || row.customer_name}.</p>`,
+              })
+            : Promise.resolve(),
+        ]).catch((mailErr) => console.error("❌ transport confirm mail error:", mailErr));
+
+        return res.json({ success: true });
+      }
+    );
   });
 };

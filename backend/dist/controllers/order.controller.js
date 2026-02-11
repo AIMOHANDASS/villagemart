@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.userCancelOrder = exports.adminCancelOrder = exports.updateOrderStatus = exports.confirmOrder = exports.getUserOrders = exports.sendGarlandReminder = exports.getGarlandOrders = exports.getAllOrders = exports.createOrder = void 0;
+exports.userCancelOrder = exports.adminCancelOrder = exports.updateOrderStatus = exports.confirmOrder = exports.getUserOrders = exports.sendGarlandReminder = exports.getGarlandOrders = exports.getAllOrders = exports.createOrder = exports.getAdminPanelData = void 0;
 const db_1 = __importDefault(require("../db"));
 const mailer_1 = require("../utils/mailer");
 const nodemailer_1 = __importDefault(require("nodemailer"));
@@ -154,6 +154,103 @@ const orderQuery = `
     GROUP BY order_id
   ) gs ON gs.order_id = o.id
 `;
+const queryRows = (sql, params = []) => new Promise((resolve, reject) => {
+    db_1.default.query(sql, params, (err, rows) => {
+        if (err)
+            return reject(err);
+        resolve((rows || []));
+    });
+});
+const getAdminPanelData = async (req, res) => {
+    try {
+        const ordersSql = `${orderQuery} ORDER BY o.created_at DESC`;
+        const garlandSql = `
+      ${orderQuery}
+      WHERE EXISTS (
+        SELECT 1 FROM garland_order_schedule gs2
+        WHERE gs2.order_id = o.id
+      )
+      OR EXISTS (
+        SELECT 1 FROM order_items og
+        WHERE og.order_id = o.id
+        AND LOWER(og.product_name) LIKE '%garland%'
+      )
+      ORDER BY o.created_at DESC
+    `;
+        const transportSql = `
+      SELECT
+        tb.id,
+        tb.user_id,
+        tb.customer_name,
+        tb.customer_phone,
+        tb.from_address,
+        tb.from_lat,
+        tb.from_lng,
+        tb.to_address,
+        tb.to_lat,
+        tb.to_lng,
+        tb.distance_km,
+        tb.charge_amount,
+        tb.status,
+        tb.notes,
+        tb.created_at,
+        u.username,
+        u.email
+      FROM transport_bookings tb
+      JOIN users u ON u.id = tb.user_id
+      ORDER BY tb.created_at DESC
+    `;
+        const partyHallSql = `
+      SELECT
+        ph.id,
+        ph.user_id,
+        ph.customer_name,
+        ph.customer_phone,
+        ph.event_date,
+        ph.start_time,
+        ph.end_time,
+        ph.person_count,
+        ph.snacks_count,
+        ph.water_count,
+        ph.cake_count,
+        ph.add_ons_json,
+        ph.notes,
+        ph.base_charge,
+        ph.add_on_charge,
+        ph.total_charge,
+        ph.status,
+        ph.created_at,
+        u.username,
+        u.email
+      FROM party_hall_bookings ph
+      JOIN users u ON u.id = ph.user_id
+      ORDER BY ph.event_date DESC, ph.start_time DESC
+    `;
+        const [orderRows, garlandRows, transportRows, partyRows] = await Promise.all([
+            queryRows(ordersSql),
+            queryRows(garlandSql),
+            queryRows(transportSql).catch(() => []),
+            queryRows(partyHallSql).catch(() => []),
+        ]);
+        return res.json({
+            orders: mapOrders(orderRows),
+            garlandOrders: mapOrders(garlandRows),
+            transportBookings: transportRows,
+            partyHallBookings: partyRows,
+        });
+    }
+    catch (err) {
+        console.error("❌ getAdminPanelData error:", err);
+        return res.status(500).json({
+            message: "Failed to load admin panel data",
+            orders: [],
+            garlandOrders: [],
+            transportBookings: [],
+            partyHallBookings: [],
+        });
+    }
+};
+exports.getAdminPanelData = getAdminPanelData;
 /* ======================================================
    🛒 CREATE ORDER
 ====================================================== */

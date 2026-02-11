@@ -9,12 +9,14 @@ import {
   updateOrderStatus,
   adminCancelOrder,
   userCancelOrder,
+  getAdminPanelData,
 } from "../controllers/order.controller";
 
 const router = express.Router();
 
 router.post("/", createOrder);
 router.get("/", getAllOrders);
+router.get("/admin/panel-data", getAdminPanelData);
 router.get("/garland", getGarlandOrders);
 router.post("/garland/reminder/:orderId", sendGarlandReminder);
 router.get("/user/:userId", getUserOrders);

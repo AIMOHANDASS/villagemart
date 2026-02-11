@@ -1,124 +1,106 @@
-// src/pages/Checkout.tsx
-
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { useNavigate } from "react-router-dom";
-import { Loader2, CheckCircle, MapPin } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { CheckCircle, Loader2 } from "lucide-react";
 import { API_BASE_URL } from "../api";
 
-// ---------------- RAZORPAY LOADER ----------------
 declare global {
   interface Window {
     Razorpay: any;
   }
 }
 
-const loadRazorpayScript = (): Promise<boolean> => {
-  return new Promise((resolve) => {
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-};
-// ------------------------------------------------
+type PaymentMethod = "cod" | "online";
+type CheckoutMode = "products" | "transport" | "partyHall";
 
-interface CartItem {
+type CartItem = {
   id: string;
   name: string;
   price: number;
   quantity: number;
   image: string;
   category?: string;
-  deliveryDate?: string; // ✅ ADDED
-}
+  deliveryDate?: string;
+};
 
-type PaymentMethod = "cod" | "online";
+type BookingDraft = {
+  type: "transport" | "partyHall";
+  payload: any;
+};
 
 type CheckoutProps = {
   user: any;
 };
 
+const DRAFT_KEY = "vm_pending_booking";
+
+const loadRazorpayScript = (): Promise<boolean> =>
+  new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+
 const Checkout: React.FC<CheckoutProps> = ({ user }) => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [draft, setDraft] = useState<BookingDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState(false);
   const [success, setSuccess] = useState(false);
-
-  const [name, setName] = useState(user?.name || "");
-  const [phone, setPhone] = useState(user?.phone || "");
-  const [address, setAddress] = useState(user?.address || "");
-  const [paymentMethod, setPaymentMethod] =
-    useState<PaymentMethod>("cod");
-
-  const [locLoading, setLocLoading] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cod");
 
   useEffect(() => {
-    const raw = localStorage.getItem("cart");
-    if (raw) setCartItems(JSON.parse(raw));
-    setLoading(false);
-  }, []);
+    const routeState = (location.state as any) || {};
+    const checkoutMode = routeState.checkoutMode as CheckoutMode | undefined;
+    const routeDraft = routeState.bookingDraft as BookingDraft | undefined;
 
-  // ---------------- CALCULATIONS ----------------
-  const subtotal = cartItems.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
+    const rawCart = localStorage.getItem("cart");
+    if (rawCart) setCartItems(JSON.parse(rawCart));
 
-  const deliveryFee = subtotal >= 500 ? 0 : 5;
-  const grandTotal = subtotal + deliveryFee;
-  // ------------------------------------------------
-
-  // ---------------- USE CURRENT LOCATION ----------------
-  const useCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      alert("Geolocation not supported");
+    if (checkoutMode === "products") {
+      setDraft(null);
+      setLoading(false);
       return;
     }
 
-    setLocLoading(true);
+    const savedDraftRaw = localStorage.getItem(DRAFT_KEY);
+    const savedDraft = savedDraftRaw ? (JSON.parse(savedDraftRaw) as BookingDraft) : null;
+    const activeDraft = routeDraft || savedDraft;
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
+    if (activeDraft && ["transport", "partyHall"].includes(activeDraft.type)) {
+      setDraft(activeDraft);
+    } else {
+      setDraft(null);
+    }
 
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-          );
-          const data = await res.json();
+    setLoading(false);
+  }, [location.state]);
 
-          if (data?.display_name) {
-            setAddress(data.display_name);
-          } else {
-            alert("Could not fetch address");
-          }
-        } catch (err) {
-          console.error(err);
-          alert("Failed to get address");
-        } finally {
-          setLocLoading(false);
-        }
-      },
-      () => {
-        alert("Location permission denied");
-        setLocLoading(false);
-      }
-    );
-  };
-  // ------------------------------------------------
+  const mode: CheckoutMode = draft?.type || "products";
 
-  // ---------------- RAZORPAY PAYMENT ----------------
-  const startRazorpayPayment = async () => {
+  const productSubtotal = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
+    [cartItems]
+  );
+  const productDeliveryFee = productSubtotal >= 500 ? 0 : 5;
+  const productTotal = productSubtotal + productDeliveryFee;
+
+  const payableAmount = useMemo(() => {
+    if (mode === "transport") return Number(draft?.payload?.chargeAmount || 0);
+    if (mode === "partyHall") return Number(draft?.payload?.totalCharge || 0);
+    return productTotal;
+  }, [draft, mode, productTotal]);
+
+  const startRazorpayPayment = async (amount: number) => {
     const loaded = await loadRazorpayScript();
     if (!loaded) {
       alert("❌ Razorpay SDK failed");
@@ -127,107 +109,156 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
 
     return new Promise<boolean>((resolve) => {
       const options = {
-        key: "rzp_live_S5dc6OUqbnjbGQ", // 🔴 replace later
-        amount: grandTotal * 100,
+        key: "rzp_live_S5dc6OUqbnjbGQ",
+        amount: amount * 100,
         currency: "INR",
         name: "VillageMart",
-        description: "Order Payment",
-        handler: function () {
-          resolve(true);
-        },
+        description: "Checkout Payment",
+        handler: () => resolve(true),
         prefill: {
-          name,
-          contact: phone,
+          name: user?.name || "",
+          contact: user?.phone || "",
         },
         theme: { color: "#16a34a" },
-        modal: {
-          ondismiss: () => resolve(false),
-        },
+        modal: { ondismiss: () => resolve(false) },
       };
 
       const rzp = new window.Razorpay(options);
       rzp.open();
     });
   };
-  // -------------------------------------------------
 
-  const placeOrder = async () => {
-    if (!name || !phone || !address) {
-      alert("❌ Fill all details");
-      return;
+  const submitProducts = async () => {
+    if (!Array.isArray(cartItems) || cartItems.length === 0) {
+      throw new Error("Cart is empty");
     }
 
-    // ✅ GARLAND 24-HOUR VALIDATION
-    const hasInvalidGarland = cartItems.some((item: any) => {
-      if (item.category !== "Garlands" || !item.deliveryDate) return false;
+    const formattedItems = cartItems.map((i) => ({
+      product_id: i.id,
+      product_name: i.name,
+      unit_price: i.price,
+      weight: i.quantity,
+      total_price: i.price * i.quantity,
+      image: i.image,
+      category: i.category,
+      deliveryDate: i.deliveryDate,
+    }));
 
-      const deliveryAt = new Date(item.deliveryDate);
-      const diffHours =
-        (deliveryAt.getTime() - new Date().getTime()) / (1000 * 60 * 60);
-
-      return diffHours < 24;
+    const res = await fetch(`${API_BASE_URL}/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: user?.id,
+        items: formattedItems,
+        subtotal: productSubtotal,
+        deliveryFee: productDeliveryFee,
+        total: productTotal,
+        address: user?.address || "",
+        phone: user?.phone || "",
+        paymentMethod,
+      }),
     });
 
-    if (hasInvalidGarland) {
-      alert("❌ Garland orders must be placed 24 hours in advance.");
-      return;
-    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Order failed");
 
+    localStorage.removeItem("cart");
+  };
+
+  const submitTransport = async () => {
+    if (!draft?.payload) throw new Error("No transport details found");
+
+    const res = await fetch(`${API_BASE_URL}/transport/book`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft.payload),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Transport booking failed");
+
+    localStorage.removeItem(DRAFT_KEY);
+  };
+
+  const submitPartyHall = async () => {
+    if (!draft?.payload) throw new Error("No party hall details found");
+
+    const res = await fetch(`${API_BASE_URL}/party-hall/book`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft.payload),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Party hall booking failed");
+
+    localStorage.removeItem(DRAFT_KEY);
+  };
+
+  const placeOrder = async () => {
     setPlacing(true);
-
     try {
+      if (payableAmount <= 0) {
+        throw new Error("Invalid payable amount");
+      }
+
       if (paymentMethod === "online") {
-        const paid = await startRazorpayPayment();
+        const paid = await startRazorpayPayment(payableAmount);
         if (!paid) throw new Error("Payment cancelled");
       }
 
-      const formattedItems = cartItems.map((i) => {
-        const unitPrice = i.price;
-        const weight = i.quantity;
-        const totalPrice = unitPrice * weight;
-
-        return {
-          product_id: i.id,
-          product_name: i.name,
-          unit_price: unitPrice,
-          weight,
-          total_price: totalPrice,
-          image: i.image,
-          category: i.category,
-          deliveryDate: i.deliveryDate, // ✅ SEND TO BACKEND
-        };
-      });
-
-      const res = await fetch(`${API_BASE_URL}/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user?.id,
-          items: formattedItems,
-          subtotal,
-          deliveryFee,
-          total: grandTotal,
-          address,
-          phone,
-          paymentMethod,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "Order failed");
+      if (mode === "transport") {
+        await submitTransport();
+      } else if (mode === "partyHall") {
+        await submitPartyHall();
+      } else {
+        await submitProducts();
       }
 
-      localStorage.removeItem("cart");
       setSuccess(true);
-
-      setTimeout(() => navigate("/"), 2500);
+      setTimeout(() => navigate("/"), 2200);
     } catch (err) {
-      console.error("Order error:", err);
-      alert("❌ Order failed. Check backend logs.");
+      const message = err instanceof Error ? err.message : "Checkout failed";
+      alert(`❌ ${message}`);
       setPlacing(false);
     }
+  };
+
+  const renderSummary = () => {
+    if (mode === "transport") {
+      return (
+        <div className="text-sm space-y-1">
+          <p className="font-semibold">Transport Payment Summary</p>
+          <p>From: {draft?.payload?.fromAddress}</p>
+          <p>To: {draft?.payload?.toAddress}</p>
+          <p>Distance: {Number(draft?.payload?.distanceKm || 0).toFixed(2)} km</p>
+          <p>Charge: ₹{Number(draft?.payload?.chargeAmount || 0).toFixed(2)}</p>
+        </div>
+      );
+    }
+
+    if (mode === "partyHall") {
+      return (
+        <div className="text-sm space-y-1">
+          <p className="font-semibold">Party Hall Payment Summary</p>
+          <p>Date: {draft?.payload?.eventDate}</p>
+          <p>Start: {draft?.payload?.startTime}</p>
+          <p>Persons: {draft?.payload?.personCount}</p>
+          <p>Base: ₹{Number(draft?.payload?.baseCharge || 0).toFixed(2)}</p>
+          <p>Add-ons: ₹{Number(draft?.payload?.addOnCharge || 0).toFixed(2)}</p>
+          <p>Total: ₹{Number(draft?.payload?.totalCharge || 0).toFixed(2)}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="text-sm space-y-1">
+        <p className="font-semibold">Product Payment Summary</p>
+        <p>Subtotal: ₹{productSubtotal.toFixed(2)}</p>
+        <p>Delivery Fee: ₹{productDeliveryFee.toFixed(2)}</p>
+        <p>Total: ₹{productTotal.toFixed(2)}</p>
+      </div>
+    );
   };
 
   if (loading) return <p>Loading...</p>;
@@ -240,59 +271,20 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <Card className="p-8 text-center animate-scale-in">
             <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-3" />
-            <h2 className="text-2xl font-bold">
-              Order Confirmed 🎉
-            </h2>
+            <h2 className="text-2xl font-bold">Payment Successful 🎉</h2>
           </Card>
         </div>
       )}
 
-      <div className="max-w-3xl mx-auto p-6 space-y-4 animate-fade-in">
-        <Card className="p-6 space-y-4 transition-all duration-500 hover:shadow-lg">
-          <Input
-            placeholder="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
+      <div className="max-w-2xl mx-auto p-6 space-y-4 animate-fade-in">
+        <Card className="p-6 space-y-4">
+          <h2 className="text-xl font-semibold">Checkout - Payment Only</h2>
+          {renderSummary()}
 
-          <Input
-            placeholder="Phone"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-
-          <div className="flex gap-2">
-            <Input
-              placeholder="Address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={useCurrentLocation}
-              disabled={locLoading}
-              className="flex gap-2 items-center transition-all duration-300 hover:scale-105"
-            >
-              {locLoading ? (
-                <Loader2 className="animate-spin h-4 w-4" />
-              ) : (
-                <MapPin className="h-4 w-4" />
-              )}
-              Use Location
-            </Button>
-          </div>
-
-          <RadioGroup
-            value={paymentMethod}
-            onValueChange={(value) =>
-              setPaymentMethod(value as PaymentMethod)
-            }
-          >
+          <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
             <div className="flex gap-4">
               <Label className="flex items-center gap-2 cursor-pointer">
-                <RadioGroupItem value="cod" /> COD
+                <RadioGroupItem value="cod" /> Cash On Delivery / Pay on Arrival
               </Label>
               <Label className="flex items-center gap-2 cursor-pointer">
                 <RadioGroupItem value="online" /> Online (Razorpay)
@@ -300,26 +292,10 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
             </div>
           </RadioGroup>
 
-          <Separator />
+          <p className="text-lg font-bold">Payable: ₹{payableAmount.toFixed(2)}</p>
 
-          <div className="space-y-1 text-sm">
-            <p>Subtotal: ₹{subtotal.toFixed(2)}</p>
-            <p>Delivery Fee: ₹{deliveryFee.toFixed(2)}</p>
-            <p className="font-bold text-lg">
-              Grand Total: ₹{grandTotal.toFixed(2)}
-            </p>
-          </div>
-
-          <Button
-            disabled={placing}
-            onClick={placeOrder}
-            className="w-full transition-all duration-300 hover:scale-[1.02]"
-          >
-            {placing ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              "Place Order"
-            )}
+          <Button disabled={placing} onClick={placeOrder} className="w-full">
+            {placing ? <Loader2 className="animate-spin" /> : "Confirm Payment & Place Booking"}
           </Button>
         </Card>
       </div>
