@@ -1,0 +1,5 @@
+{
+	"appId": "com.villagemart.app",
+	"appName": "VillageMart",
+	"webDir": "dist/client"
+}
