@@ -1,19 +1,11 @@
 import { Request, Response } from "express";
 import db from "../db";
-import nodemailer from "nodemailer";
+import { sendPartyHallBookingConfirmMail, transporter } from "../utils/mailer";
 
 const PARTY_HALL_BASE_CHARGE = 700;
 const PARTY_HALL_DURATION_HOURS = 3;
 const SUPPORT_NUMBER = "91+ 8903003808";
 
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
 
 const addOnPriceMap: Record<string, number> = {
   water: 5,
@@ -27,16 +19,16 @@ db.query(
   `
   CREATE TABLE IF NOT EXISTS party_hall_bookings (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    customer_name VARCHAR(120) NOT NULL,
+    \`user id\` INT NOT NULL,
+    \`customer name\` VARCHAR(120) NOT NULL,
     customer_phone VARCHAR(25) NOT NULL,
-    event_date DATE NOT NULL,
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
+    \`event date\` DATE NOT NULL,
+    \`start time\` TIME NOT NULL,
+    \`end time\` TIME NOT NULL,
     person_count INT NOT NULL,
-    snacks_count INT NOT NULL DEFAULT 0,
+    \`snacks count\` INT NOT NULL DEFAULT 0,
     water_count INT NOT NULL DEFAULT 0,
-    cake_count INT NOT NULL DEFAULT 0,
+    \`cake count\` INT NOT NULL DEFAULT 0,
     add_ons_json JSON NULL,
     notes TEXT NULL,
     base_charge DECIMAL(10,2) NOT NULL,
@@ -44,9 +36,8 @@ db.query(
     total_charge DECIMAL(10,2) NOT NULL,
     status VARCHAR(40) NOT NULL DEFAULT 'BOOKED',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_partyhall_user (user_id),
-    INDEX idx_partyhall_date (event_date),
-    CONSTRAINT fk_partyhall_user FOREIGN KEY (user_id) REFERENCES users(id)
+    INDEX idx_partyhall_user (\`user id\`),
+    INDEX idx_partyhall_date (\`event date\`)
   )
   `,
   (err) => {
@@ -87,9 +78,9 @@ const hasSlotOverlap = (
 ) => {
   const sql = `
     SELECT id FROM party_hall_bookings
-    WHERE event_date = ?
+    WHERE \`event date\` = ?
       AND status <> 'CANCELLED'
-      AND NOT (end_time <= ? OR start_time >= ?)
+      AND NOT (\`end time\` <= ? OR \`start time\` >= ?)
     LIMIT 1
   `;
 
@@ -162,7 +153,7 @@ export const createPartyHallBooking = (req: Request, res: Response) => {
 
     const sql = `
       INSERT INTO party_hall_bookings
-      (user_id, customer_name, customer_phone, event_date, start_time, end_time, person_count, snacks_count, water_count, cake_count, add_ons_json, notes, base_charge, add_on_charge, total_charge)
+      (\`user id\`, \`customer name\`, customer_phone, \`event date\`, \`start time\`, \`end time\`, person_count, \`snacks count\`, water_count, \`cake count\`, add_ons_json, notes, base_charge, add_on_charge, total_charge)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
@@ -191,7 +182,7 @@ export const createPartyHallBooking = (req: Request, res: Response) => {
           return res.status(500).json({ message: "Failed to create party hall booking" });
         }
 
-        db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
+        db.query("INSERT INTO notifications (`user id`, message) VALUES (?,?)", [
           Number(userId),
           `🏛 Party hall booked on ${eventDate} ${startTime}-${endTime}. Clarification: ${SUPPORT_NUMBER}`,
         ]);
@@ -219,11 +210,11 @@ export const getPartyHallAvailability = (req: Request, res: Response) => {
   }
 
   const sql = `
-    SELECT id, start_time, end_time, status
+    SELECT id, \`start time\` AS start_time, \`end time\` AS end_time, status
     FROM party_hall_bookings
-    WHERE event_date = ?
+    WHERE \`event date\` = ?
       AND status <> 'CANCELLED'
-    ORDER BY start_time ASC
+    ORDER BY \`start time\` ASC
   `;
 
   db.query(sql, [eventDate], (err: any, rows: any[]) => {
@@ -240,16 +231,16 @@ export const getAllPartyHallBookings = (req: Request, res: Response) => {
   const sql = `
     SELECT
       ph.id,
-      ph.user_id,
-      ph.customer_name,
+      ph.\`user id\` AS user_id,
+      ph.\`customer name\` AS customer_name,
       ph.customer_phone,
-      ph.event_date,
-      ph.start_time,
-      ph.end_time,
+      ph.\`event date\` AS event_date,
+      ph.\`start time\` AS start_time,
+      ph.\`end time\` AS end_time,
       ph.person_count,
-      ph.snacks_count,
+      ph.\`snacks count\` AS snacks_count,
       ph.water_count,
-      ph.cake_count,
+      ph.\`cake count\` AS cake_count,
       ph.add_ons_json,
       ph.notes,
       ph.base_charge,
@@ -260,8 +251,8 @@ export const getAllPartyHallBookings = (req: Request, res: Response) => {
       u.username,
       u.email
     FROM party_hall_bookings ph
-    JOIN users u ON u.id = ph.user_id
-    ORDER BY ph.event_date DESC, ph.start_time DESC
+    JOIN users u ON u.id = ph.\`user id\`
+    ORDER BY ph.\`event date\` DESC, ph.\`start time\` DESC
   `;
 
   db.query(sql, (err: any, rows: any[]) => {
@@ -281,16 +272,16 @@ export const getUserPartyHallBookings = (req: Request, res: Response) => {
   const sql = `
     SELECT
       id,
-      user_id,
-      customer_name,
+      \`user id\` AS user_id,
+      \`customer name\` AS customer_name,
       customer_phone,
-      event_date,
-      start_time,
-      end_time,
+      \`event date\` AS event_date,
+      \`start time\` AS start_time,
+      \`end time\` AS end_time,
       person_count,
-      snacks_count,
+      \`snacks count\` AS snacks_count,
       water_count,
-      cake_count,
+      \`cake count\` AS cake_count,
       add_ons_json,
       notes,
       base_charge,
@@ -299,8 +290,8 @@ export const getUserPartyHallBookings = (req: Request, res: Response) => {
       status,
       created_at
     FROM party_hall_bookings
-    WHERE user_id = ?
-    ORDER BY event_date DESC, start_time DESC
+    WHERE \`user id\` = ?
+    ORDER BY \`event date\` DESC, \`start time\` DESC
   `;
 
   db.query(sql, [userId], (err: any, rows: any[]) => {
@@ -320,7 +311,7 @@ export const confirmPartyHallBooking = (req: Request, res: Response) => {
   const sql = `
     SELECT ph.*, u.email, u.username
     FROM party_hall_bookings ph
-    JOIN users u ON u.id = ph.user_id
+    JOIN users u ON u.id = ph.\`user id\`
     WHERE ph.id = ?
     LIMIT 1
   `;
@@ -345,34 +336,33 @@ export const confirmPartyHallBooking = (req: Request, res: Response) => {
           return res.status(500).json({ message: "Failed to confirm party hall booking" });
         }
 
-        db.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
-          Number(row.user_id),
+        db.query("INSERT INTO notifications (`user id`, message) VALUES (?,?)", [
+          Number(row["user id"]),
           `✅ Party hall booking #${bookingId} confirmed by admin`,
         ]);
 
-        const userMail = row.email;
-        const adminMail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
-        const mailHtml = `
-          <p>Hi ${row.username || row.customer_name},</p>
-          <p>Your party hall booking <b>#${bookingId}</b> is confirmed.</p>
-          <p><b>Date:</b> ${row.event_date}<br/><b>Time:</b> ${row.start_time} - ${row.end_time}</p>
-          <p><b>Persons:</b> ${row.person_count}<br/><b>Total Charge:</b> ₹${Number(row.total_charge).toFixed(2)}</p>
-          <p>For clarification: ${SUPPORT_NUMBER}</p>
-        `;
+        const userMail = String(row.email || "").trim();
+        const adminMail = (process.env.ADMIN_EMAIL || process.env.EMAIL_USER || "").trim();
 
         Promise.all([
           userMail
-            ? transporter.sendMail({
+            ? sendPartyHallBookingConfirmMail({
                 to: userMail,
-                subject: `Party Hall Booking Confirmed (#${bookingId})`,
-                html: mailHtml,
+                username: row.username || row["customer name"],
+                bookingId,
+                eventDate: String(row["event date"] || ""),
+                startTime: String(row["start time"] || ""),
+                endTime: String(row["end time"] || ""),
+                personCount: Number(row.person_count || 0),
+                totalCharge: Number(row.total_charge || 0),
+                supportNumber: SUPPORT_NUMBER,
               })
             : Promise.resolve(),
           adminMail
             ? transporter.sendMail({
                 to: adminMail,
                 subject: `Admin Copy: Party Hall Confirmed (#${bookingId})`,
-                html: `<p>Party hall booking #${bookingId} confirmed for ${row.username || row.customer_name}.</p>`,
+                html: `<p>Party hall booking #${bookingId} confirmed for ${row.username || row["customer name"]}.</p>`,
               })
             : Promise.resolve(),
         ]).catch((mailErr) => console.error("❌ party hall confirm mail error:", mailErr));

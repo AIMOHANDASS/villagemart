@@ -1,7 +1,9 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../api";
 import { GoogleLogin } from "@react-oauth/google";
+import { motion } from "framer-motion";
+import toast from "react-hot-toast";
 
 type Props = { onLogin: (u: any) => void };
 
@@ -11,6 +13,43 @@ const Login: React.FC<Props> = ({ onLogin }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const [loginType, setLoginType] = useState<"customer" | "admin" | "partner_transport" | "partner_delivery">("customer");
+
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const appParam = queryParams.get("app");
+
+    // Auto-lock dropdown configurations based on URL parameters 🎯
+    if (appParam === "admin") setLoginType("admin");
+    else if (appParam === "transport") setLoginType("partner_transport");
+    else if (appParam === "delivery") setLoginType("partner_delivery");
+    else setLoginType("customer");
+  }, [location.search]);
+
+  const onLoginSuccess = (responseData: any) => {
+    const targetRole = String(responseData.user.role).toUpperCase();
+
+    // ⚠️ INTENTIONAL SECURITY REGRESSION AS REQUESTED
+    // We are deliberately reverting back to the single generic 'jwt_token' key
+    // This will cause 403 Access Denied cross-contamination bugs when switching apps!
+    localStorage.setItem("jwt_token", responseData.token);
+    
+    // Maintain old fallback keys just in case
+    if (targetRole === "ADMIN") localStorage.setItem("admin_token", responseData.token);
+    
+    // Set user and role (Transport/Delivery subapps expect "role")
+    localStorage.setItem("role", targetRole);
+    localStorage.setItem("user", JSON.stringify(responseData.user));
+    onLogin(responseData.user); // Maintaining the prop call for App state sync
+
+    // Route directly to custom multi-app windows seamlessly via ?app=
+    if (targetRole === "ADMIN") window.location.href = "/?app=admin";
+    else if (targetRole === "TRANSPORT") window.location.href = "/?app=transport";
+    else if (targetRole === "DELIVERY") window.location.href = "/?app=delivery";
+    else window.location.href = "/";
+  };
 
   /* ---------------- NORMAL LOGIN ---------------- */
   const handleSubmit = async (e: React.FormEvent) => {
@@ -21,16 +60,18 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     if (username === "Mohan" && password === "mohan123") {
       const admin = { username: "Mohan", role: "admin" };
       localStorage.setItem("user", JSON.stringify(admin));
+      localStorage.setItem("admin_token", "admin-token"); // Set token for AdminRoute
       onLogin(admin);
-      navigate("/admin");
+      toast.success("Welcome Admin Mohan! 🔐");
+      navigate("/admin/dashboard");
       return;
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/users/login`, {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ usernameOrEmail: username, password, loginType }),
       });
 
       const text = await res.text();
@@ -48,9 +89,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         return;
       }
 
-      localStorage.setItem("user", JSON.stringify(data.user));
-      onLogin(data.user);
-      navigate("/");
+      onLoginSuccess(data);
     } catch {
       setError("Network error");
     }
@@ -73,107 +112,180 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         return;
       }
 
-      localStorage.setItem("user", JSON.stringify(data.user));
-      onLogin(data.user);
-      navigate("/");
+      onLoginSuccess(data);
     } catch {
       setError("Google login error");
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <form
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4">
+      {/* Decorative background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-20 -left-20 w-64 h-64 bg-primary/5 rounded-full" />
+        <div className="absolute -bottom-20 -right-20 w-80 h-80 bg-emerald-500/5 rounded-full" />
+      </div>
+
+      <motion.form
         onSubmit={handleSubmit}
-        className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm
-                   border border-gray-200 animate-fade-in"
+        className="relative bg-white dark:bg-card p-8 rounded-3xl shadow-2xl w-full max-w-sm
+                   border border-gray-100 dark:border-gray-800"
+        initial={{ opacity: 0, y: 30, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.5, type: "spring", stiffness: 200 }}
       >
-        <h2 className="text-3xl font-bold mb-6 text-center text-gray-800">
-          Login
-        </h2>
+        {/* Logo */}
+        <motion.div
+          className="flex justify-center mb-6"
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ delay: 0.2, type: "spring" }}
+        >
+          <div className="w-16 h-16 bg-gradient-to-br from-primary to-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary/30">
+            <span className="text-3xl">🌿</span>
+          </div>
+        </motion.div>
+
+        <motion.h2
+          className="text-2xl font-bold mb-1 text-center text-gray-800 dark:text-gray-200"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+        >
+          Welcome Back
+        </motion.h2>
+        <motion.p
+          className="text-sm text-muted-foreground text-center mb-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
+        >
+          Sign in to your VillageMart account
+        </motion.p>
 
         {error && (
-          <p className="text-red-600 bg-red-100 p-3 rounded-lg mb-4 text-sm animate-shake">
+          <motion.p
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-red-600 bg-red-50 dark:bg-red-900/20 p-3 rounded-xl mb-4 text-sm border border-red-200 dark:border-red-800"
+          >
             {error}
-          </p>
+          </motion.p>
         )}
 
+
+
         {/* USERNAME */}
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-          className="w-full p-3 mb-4 border rounded-xl
-                     focus:ring-2 focus:ring-blue-500"
-        />
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <input
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+            className="w-full p-3.5 mb-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800
+                       focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all duration-300 outline-none"
+          />
+        </motion.div>
 
         {/* PASSWORD WITH EYE */}
-        <div className="relative mb-2">
+        <motion.div
+          className="relative mb-2"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.45 }}
+        >
           <input
             type={showPassword ? "text" : "password"}
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="w-full p-3 border rounded-xl pr-12
-                       focus:ring-2 focus:ring-blue-500"
+            className="w-full p-3.5 border border-gray-200 dark:border-gray-700 rounded-xl pr-12 bg-gray-50 dark:bg-gray-800
+                       focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all duration-300 outline-none"
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-3 text-lg hover:scale-110 transition"
+            className="absolute right-3 top-3.5 text-lg hover:scale-110 transition-transform"
           >
             {showPassword ? "🙈" : "👁️"}
           </button>
-        </div>
+        </motion.div>
 
         {/* FORGOT PASSWORD */}
-        <div className="text-right mb-5">
+        <motion.div
+          className="text-right mb-5"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+        >
           <button
             type="button"
             onClick={() => navigate("/forgot-password")}
-            className="text-sm text-blue-600 hover:text-blue-800 transition"
+            className="text-sm text-primary hover:text-primary/80 transition-colors font-medium"
           >
             Forgot password?
           </button>
-        </div>
+        </motion.div>
 
         {/* LOGIN BUTTON */}
-        <button
-          type="submit"
-          className="w-full bg-blue-600 hover:bg-blue-700
-                     text-white font-semibold p-3 rounded-xl
-                     transition hover:scale-[1.02]"
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.55 }}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
         >
-          Login
-        </button>
+          <button
+            type="submit"
+            className="w-full bg-gradient-to-r from-primary to-emerald-600 hover:from-primary/90 hover:to-emerald-500
+                       text-white font-semibold p-3.5 rounded-xl
+                       transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl ripple-container"
+          >
+            Sign In
+          </button>
+        </motion.div>
 
         {/* OR */}
-        <div className="flex items-center gap-2 my-5">
-          <div className="flex-1 h-px bg-gray-300"></div>
-          <span className="text-gray-500 text-sm">OR</span>
-          <div className="flex-1 h-px bg-gray-300"></div>
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
+          <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">or</span>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
         </div>
 
         {/* GOOGLE LOGIN */}
-        <GoogleLogin
-          onSuccess={(res) => handleGoogleLogin(res.credential)}
-          onError={() => setError("Google login cancelled")}
-        />
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+        >
+          <GoogleLogin
+            onSuccess={(res) => handleGoogleLogin(res.credential)}
+            onError={() => setError("Google login cancelled")}
+          />
+        </motion.div>
 
         {/* SIGNUP LINK */}
-        <p className="text-center mt-6 text-gray-600 text-sm">
-          Don’t have an account?{" "}
+        <motion.p
+          className="text-center mt-6 text-gray-600 dark:text-gray-400 text-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.65 }}
+        >
+          Don't have an account?{" "}
           <button
             type="button"
             onClick={() => navigate("/signup")}
-            className="text-blue-600 font-medium hover:text-blue-800 transition"
+            className="text-primary font-semibold hover:text-primary/80 transition-colors"
           >
             Sign up
           </button>
-        </p>
-      </form>
+        </motion.p>
+      </motion.form>
     </div>
   );
 };

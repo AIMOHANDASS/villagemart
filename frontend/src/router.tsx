@@ -8,7 +8,7 @@ import Login from "./pages/Login";
 import Products from "./pages/Products";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
-import AdminPanel from "./pages/AdminPanel";
+
 import TestMap from "./pages/TestMap";
 import Transport from "./pages/Transport";
 import PartyHall from "./pages/PartyHall";
@@ -18,6 +18,9 @@ import MyOrders from "./pages/MyOrders";
 import Notifications from "./pages/Notifications";
 import Profile from "./pages/Profile";
 import ForgotPassword from "./pages/ForgotPassword";
+
+import AdminPanel from "./pages/AdminPanel";
+import AdminLogin from "./pages/AdminLogin";
 
 type Props = {
   user: any;
@@ -32,15 +35,24 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin }) => {
     return user ? children : <Navigate to="/login" replace />;
   };
 
-  /* 👑 Admin Route */
+  /* 🔐 Admin Protected Route */
   const AdminRoute: React.FC<{ children: JSX.Element }> = ({ children }) => {
-    return user?.username === "Mohan"
-      ? children
-      : <Navigate to="/login" replace />;
+    const token = localStorage.getItem("admin_token");
+    return token ? children : <Navigate to="/admin/login" replace />;
   };
 
   return (
     <Routes>
+      {/* ================= ADMIN ROUTES ================= */}
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route
+        path="/admin/dashboard"
+        element={
+          <AdminRoute>
+            <AdminPanel />
+          </AdminRoute>
+        }
+      />
 
       {/* ================= PUBLIC ROUTES ================= */}
       <Route path="/" element={<Home user={user} />} />
@@ -112,15 +124,7 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin }) => {
         }
       />
 
-      {/* ================= ADMIN ROUTE ================= */}
-      <Route
-        path="/admin"
-        element={
-          <AdminRoute>
-            <AdminPanel />
-          </AdminRoute>
-        }
-      />
+
 
       {/* ================= FALLBACK ================= */}
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,44 +1,56 @@
 // src/pages/TestMap.tsx
 import React, { useState, useEffect } from "react";
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-import L from "leaflet";
+import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+
+const GOOGLE_MAPS_LIBRARIES: any = ["places", "marker"];
 
 const TestMap: React.FC = () => {
-  const [location, setLocation] = useState<[number, number] | null>(null);
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
+    libraries: GOOGLE_MAPS_LIBRARIES,
+  });
+
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocation([pos.coords.latitude, pos.coords.longitude]);
+        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
       },
       (err) => console.error(err),
       { enableHighAccuracy: true }
     );
   }, []);
 
-  function LocationMarker() {
-    useMapEvents({
-      click(e) {
-        setLocation([e.latlng.lat, e.latlng.lng]);
-      },
-    });
+  const handleMapClick = (e: google.maps.MapMouseEvent) => {
+    if (e.latLng) {
+      setLocation({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+    }
+  };
 
-    return location ? <Marker position={location} /> : null;
+  const center = location || { lat: 20.5937, lng: 78.9629 };
+
+  if (!isLoaded) {
+    return <div className="p-8 text-center text-sm text-gray-500">Loading Maps Configuration...</div>;
   }
 
   return (
-    <div className="h-screen">
-      <MapContainer
-        center={location || [20.5937, 78.9629]}
+    <div className="h-screen w-screen">
+      <GoogleMap
+        mapContainerStyle={{ height: "100%", width: "100%" }}
+        center={center}
         zoom={15}
-        style={{ height: "100%", width: "100%" }}
+        onClick={handleMapClick}
+        options={{
+          mapTypeControl: false,
+          streetViewControl: false,
+        }}
       >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        <LocationMarker />
-      </MapContainer>
+        {location && <Marker position={location} />}
+      </GoogleMap>
     </div>
   );
 };
 
 export default TestMap;
+

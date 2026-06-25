@@ -10,4 +10,5 @@ router.post("/book", partyHall_controller_1.createPartyHallBooking);
 router.get("/", partyHall_controller_1.getAllPartyHallBookings);
 router.get("/availability", partyHall_controller_1.getPartyHallAvailability);
 router.get("/user/:userId", partyHall_controller_1.getUserPartyHallBookings);
+router.post("/confirm/:bookingId", partyHall_controller_1.confirmPartyHallBooking);
 exports.default = router;

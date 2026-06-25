@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { OAuth2Client } from "google-auth-library";
 import db from "../db";
+import { generateToken } from "../middleware/auth.middleware";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -45,28 +46,58 @@ export const googleAuth = async (req: Request, res: Response) => {
         if (rows.length > 0) {
           const user = rows[0];
           delete user.password;
-          return res.json({ user });
+          
+          const role = (user.role || "CUSTOMER").toUpperCase();
+          const token = generateToken({
+            id: user.id,
+            username: user.username,
+            role,
+          });
+
+          return res.json({ 
+            success: true,
+            message: "Google Login successful",
+            token,
+            role,
+            user_id: user.id,
+            user: {
+              ...user,
+              role
+            }
+          });
         }
 
         // ✅ NEW USER → SIGNUP
         const username = email.split("@")[0] + "_" + Math.floor(Math.random() * 1000);
 
         db.query(
-          `INSERT INTO users (name, username, email, phone, password)
-           VALUES (?, ?, ?, ?, ?)`,
-          [name || "Google User", username, email, "0000000000", "GOOGLE_AUTH"],
+          `INSERT INTO users (name, username, email, phone, password, role)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [name || "Google User", username, email, "0000000000", "GOOGLE_AUTH", "CUSTOMER"],
           (err, result: any) => {
             if (err) {
               return res.status(500).json({ message: "Signup failed" });
             }
 
+            const token = generateToken({
+              id: result.insertId,
+              username,
+              role: "CUSTOMER",
+            });
+
             return res.json({
+              success: true,
+              message: "Google Signup successful",
+              token,
+              role: "CUSTOMER",
+              user_id: result.insertId,
               user: {
                 id: result.insertId,
                 name,
                 username,
                 email,
                 phone: "0000000000",
+                role: "CUSTOMER"
               },
             });
           }

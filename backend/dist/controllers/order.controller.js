@@ -3,18 +3,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.userCancelOrder = exports.adminCancelOrder = exports.updateOrderStatus = exports.confirmOrder = exports.getUserOrders = exports.sendGarlandReminder = exports.getGarlandOrders = exports.getAllOrders = exports.createOrder = exports.getAdminPanelData = void 0;
+exports.userCancelOrder = exports.adminCancelOrder = exports.updateOrderStatusUnified = exports.updateOrderStatus = exports.confirmOrder = exports.getUserOrders = exports.sendGarlandReminder = exports.getGarlandOrders = exports.getAllOrders = exports.createOrder = exports.getAdminPanelData = void 0;
 const db_1 = __importDefault(require("../db"));
 const mailer_1 = require("../utils/mailer");
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const delivery_controller_1 = require("./delivery.controller");
 /* ======================================================
-   📧 EMAIL TRANSPORT (Admin Alert)
+    📧 EMAIL TRANSPORT (Admin Alert)
 ====================================================== */
 const transporter = nodemailer_1.default.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // true for port 465, false for other ports
     auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        // Changed from EMAIL_PASS to EMAIL_PASSWORD to match your .env file
+        pass: process.env.EMAIL_PASSWORD,
     },
 });
 /* ======================================================
@@ -23,12 +27,12 @@ const transporter = nodemailer_1.default.createTransport({
 db_1.default.query(`
     CREATE TABLE IF NOT EXISTS garland_order_schedule (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      order_id INT NOT NULL,
+      \`order id\` INT NOT NULL,
       delivery_at DATETIME NOT NULL,
-      reminder_sent TINYINT(1) NOT NULL DEFAULT 0,
-      last_reminder_at DATETIME NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_garland_order_id (order_id),
+      \`reminder sent\` TINYINT(1) NOT NULL DEFAULT 0,
+      \`last reminder at\` DATETIME NULL,
+      \`created at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_garland_order_id (\`order id\`),
       INDEX idx_garland_delivery_at (delivery_at)
     )
   `, (err) => {
@@ -43,6 +47,7 @@ const updateStatus = (orderId, status, tracking, timeField) => {
     let sql = `UPDATE orders SET status=?, tracking_status=?`;
     const params = [status, tracking];
     if (timeField) {
+        // timeField values already use backticks when needed
         sql += `, ${timeField}=NOW()`;
     }
     sql += ` WHERE id=?`;
@@ -51,6 +56,20 @@ const updateStatus = (orderId, status, tracking, timeField) => {
         if (err) {
             console.error("❌ updateStatus error:", err);
         }
+    });
+};
+/* ======================================================
+   🔔 REUSABLE NOTIFICATION BUILDER HELPER
+   Safely writes alert messages into our verified
+   notifications table schema using backtick-escaped columns.
+====================================================== */
+const createOrderNotification = (userId, message) => {
+    const sql = "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)";
+    db_1.default.query(sql, [userId, message], (err) => {
+        if (err)
+            console.error("❌ Failed to log background action notification:", err);
+        else
+            console.log("🔔 Background action notification successfully broadcasted locally!");
     });
 };
 const normalizeStatus = (value) => (value || "").toUpperCase();
@@ -72,12 +91,12 @@ const isAtLeast24HoursAhead = (date) => {
     return diffHours >= 24;
 };
 const getCurrentOrderStatus = (orderId, cb) => {
-    db_1.default.query("SELECT tracking_status, user_id FROM orders WHERE id=? LIMIT 1", [orderId], (err, rows) => {
+    db_1.default.query("SELECT tracking_status, `user id` FROM orders WHERE id=? LIMIT 1", [orderId], (err, rows) => {
         if (err)
             return cb(err);
         if (!rows || rows.length === 0)
             return cb(new Error("Order not found"));
-        cb(null, normalizeStatus(rows[0].tracking_status), Number(rows[0].user_id));
+        cb(null, normalizeStatus(rows[0].tracking_status), Number(rows[0]["user id"]));
     });
 };
 const mapOrders = (rows) => {
@@ -92,6 +111,7 @@ const mapOrders = (rows) => {
                 delivery_fee: Number(row.delivery_fee),
                 status: row.status,
                 tracking_status: row.tracking_status,
+                delivery_status: row.delivery_status,
                 cancel_reason: row.cancel_reason,
                 created_at: row.created_at,
                 picked_at: row.picked_at,
@@ -120,15 +140,17 @@ const orderQuery = `
     o.id AS orderId,
     u.username,
     u.email,
-    o.total_amount,
+    o.\`total amount\` AS total_amount,
     o.delivery_fee,
     o.status,
-    o.tracking_status,
-    o.cancel_reason,
-    o.created_at,
-    o.picked_at,
+    COALESCE(o.delivery_status, o.tracking_status) AS tracking_status,
+    o.delivery_status,
+    o.delivery_partner_id,
+    o.\`cancel reason\` AS cancel_reason,
+    o.\`created at\` AS created_at,
+    o.\`picked at\` AS picked_at,
     o.out_for_delivery_at,
-    o.delivered_at,
+    o.\`delivered at\` AS delivered_at,
 
     oi.id AS item_id,
     oi.product_name,
@@ -142,16 +164,16 @@ const orderQuery = `
     gs.garland_last_reminder_at
 
   FROM orders o
-  JOIN users u ON u.id = o.user_id
-  LEFT JOIN order_items oi ON oi.order_id = o.id
+  JOIN users u ON u.id = o.\`user id\`
+  LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
   LEFT JOIN (
     SELECT
-      order_id,
+      \`order id\` AS order_id,
       MIN(delivery_at) AS garland_delivery_at,
-      MAX(reminder_sent) AS garland_reminder_sent,
-      MAX(last_reminder_at) AS garland_last_reminder_at
+      MAX(\`reminder sent\`) AS garland_reminder_sent,
+      MAX(\`last reminder at\`) AS garland_last_reminder_at
     FROM garland_order_schedule
-    GROUP BY order_id
+    GROUP BY \`order id\`
   ) gs ON gs.order_id = o.id
 `;
 const queryRows = (sql, params = []) => new Promise((resolve, reject) => {
@@ -163,56 +185,56 @@ const queryRows = (sql, params = []) => new Promise((resolve, reject) => {
 });
 const getAdminPanelData = async (req, res) => {
     try {
-        const ordersSql = `${orderQuery} ORDER BY o.created_at DESC`;
+        const ordersSql = `${orderQuery} ORDER BY o.\`created at\` DESC`;
         const garlandSql = `
       ${orderQuery}
       WHERE EXISTS (
         SELECT 1 FROM garland_order_schedule gs2
-        WHERE gs2.order_id = o.id
+        WHERE gs2.\`order id\` = o.id
       )
       OR EXISTS (
-        SELECT 1 FROM order_items og
+        SELECT 1 FROM \`order_items\` og
         WHERE og.order_id = o.id
         AND LOWER(og.product_name) LIKE '%garland%'
       )
-      ORDER BY o.created_at DESC
+      ORDER BY o.\`created at\` DESC
     `;
         const transportSql = `
       SELECT
         tb.id,
-        tb.user_id,
+        tb.\`user id\` AS user_id,
         tb.customer_name,
         tb.customer_phone,
         tb.from_address,
-        tb.from_lat,
-        tb.from_lng,
-        tb.to_address,
-        tb.to_lat,
-        tb.to_lng,
-        tb.distance_km,
+        tb.\`from lat\` AS from_lat,
+        tb.from_Ing AS from_lng,
+        tb.\`to address\` AS to_address,
+        tb.\`to lat\` AS to_lat,
+        tb.\`to Ing\` AS to_lng,
+        tb.\`distance km\` AS distance_km,
         tb.charge_amount,
         tb.status,
         tb.notes,
-        tb.created_at,
+        tb.\`created at\` AS created_at,
         u.username,
         u.email
       FROM transport_bookings tb
-      JOIN users u ON u.id = tb.user_id
-      ORDER BY tb.created_at DESC
+      JOIN users u ON u.id = tb.\`user id\`
+      ORDER BY tb.\`created at\` DESC
     `;
         const partyHallSql = `
       SELECT
         ph.id,
-        ph.user_id,
-        ph.customer_name,
+        ph.\`user id\` AS user_id,
+        ph.\`customer name\` AS customer_name,
         ph.customer_phone,
-        ph.event_date,
-        ph.start_time,
-        ph.end_time,
+        ph.\`event date\` AS event_date,
+        ph.\`start time\` AS start_time,
+        ph.\`end time\` AS end_time,
         ph.person_count,
-        ph.snacks_count,
+        ph.\`snacks count\` AS snacks_count,
         ph.water_count,
-        ph.cake_count,
+        ph.\`cake count\` AS cake_count,
         ph.add_ons_json,
         ph.notes,
         ph.base_charge,
@@ -223,8 +245,8 @@ const getAdminPanelData = async (req, res) => {
         u.username,
         u.email
       FROM party_hall_bookings ph
-      JOIN users u ON u.id = ph.user_id
-      ORDER BY ph.event_date DESC, ph.start_time DESC
+      JOIN users u ON u.id = ph.\`user id\`
+      ORDER BY ph.\`event date\` DESC, ph.\`start time\` DESC
     `;
         const [orderRows, garlandRows, transportRows, partyRows] = await Promise.all([
             queryRows(ordersSql),
@@ -274,11 +296,12 @@ const createOrder = (req, res) => {
         }
     }
     const subtotal = items.reduce((sum, i) => sum + Number(i.total_price || 0), 0);
+    // ✅ FIXED: Hardcoded delivery fee — ₹5 flat (free above ₹500)
     const deliveryFee = subtotal >= 500 ? 0 : 5;
     const grandTotal = subtotal + deliveryFee;
     const orderSql = `
     INSERT INTO orders 
-    (user_id, total_amount, delivery_fee, status, tracking_status, address, phone, payment_method)
+    (\`user id\`, \`total amount\`, delivery_fee, status, tracking_status, address, phone, payment_method)
     VALUES (?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?)
   `;
     db_1.default.query(orderSql, [
@@ -288,31 +311,46 @@ const createOrder = (req, res) => {
         address || "",
         phone || "",
         paymentMethod || "cod",
-    ], (err, result) => {
+    ], async (err, result) => {
         if (err) {
             console.error("❌ Create order error:", err);
             return res.status(500).json({ message: "Order creation failed" });
         }
         const orderId = result.insertId;
+        // ✅ Notify customer: order placed
+        createOrderNotification(Number(userId), `🛒 Order #${orderId} placed successfully! Total: ₹${grandTotal.toFixed(2)}`);
+        // ✅ AUTO-ASSIGNMENT LOGIC
+        db_1.default.query("SELECT latitude, longitude FROM users WHERE id = ?", [userId], (locErr, locRows) => {
+            if (!locErr && locRows.length > 0) {
+                const { latitude, longitude } = locRows[0];
+                if (latitude && longitude) {
+                    (0, delivery_controller_1.autoAssignNearestPartner)(orderId, Number(latitude), Number(longitude));
+                }
+            }
+        });
         const itemSql = `
-        INSERT INTO order_items
-        (order_id, product_id, product_name, unit_price, weight, total_price, image)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO \`order_items\`
+        (order_id, product_id, product_name, unit_price, weight, total_price, image, category, deliveryDate, slot)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
         items.forEach((item) => {
+            const rawWeight = Number(item.weight) || 1;
             db_1.default.query(itemSql, [
                 orderId,
                 item.product_id,
                 item.product_name,
                 Number(item.unit_price),
-                Number(item.weight),
+                rawWeight,
                 Number(item.total_price),
                 item.image || "",
+                item.category || null,
+                item.deliveryDate || null,
+                item.slot || null,
             ]);
             if (isGarlandItem(item)) {
                 const deliveryDate = getValidDeliveryDate(item.deliveryDate || item.delivery_at);
                 if (deliveryDate) {
-                    db_1.default.query(`INSERT INTO garland_order_schedule (order_id, delivery_at)
+                    db_1.default.query(`INSERT INTO garland_order_schedule (\`order id\`, delivery_at)
                VALUES (?, ?)`, [orderId, deliveryDate]);
                 }
             }
@@ -325,7 +363,7 @@ exports.createOrder = createOrder;
    📦 GET ALL ORDERS (ADMIN)
 ====================================================== */
 const getAllOrders = (req, res) => {
-    const sql = `${orderQuery} ORDER BY o.created_at DESC`;
+    const sql = `${orderQuery} ORDER BY o.\`created at\` DESC`;
     db_1.default.query(sql, (err, rows) => {
         if (err) {
             console.error("❌ Fetch orders error:", err);
@@ -343,14 +381,14 @@ const getGarlandOrders = (req, res) => {
     ${orderQuery}
     WHERE EXISTS (
       SELECT 1 FROM garland_order_schedule gs2
-      WHERE gs2.order_id = o.id
+      WHERE gs2.\`order id\` = o.id
     )
     OR EXISTS (
-      SELECT 1 FROM order_items og
+      SELECT 1 FROM \`order_items\` og
       WHERE og.order_id = o.id
       AND LOWER(og.product_name) LIKE '%garland%'
     )
-    ORDER BY o.created_at DESC
+    ORDER BY o.\`created at\` DESC
   `;
     db_1.default.query(sql, (err, rows) => {
         if (err) {
@@ -372,15 +410,15 @@ const sendGarlandReminder = (req, res) => {
     const sql = `
     SELECT
       o.id AS order_id,
-      o.user_id,
+      o.\`user id\` AS user_id,
       u.username,
       u.email,
       gs.delivery_at,
-      gs.reminder_sent,
-      gs.last_reminder_at
+      gs.\`reminder sent\` AS reminder_sent,
+      gs.\`last reminder at\` AS last_reminder_at
     FROM orders o
-    JOIN users u ON u.id = o.user_id
-    JOIN garland_order_schedule gs ON gs.order_id = o.id
+    JOIN users u ON u.id = o.\`user id\`
+    JOIN garland_order_schedule gs ON gs.\`order id\` = o.id
     WHERE o.id = ?
     ORDER BY gs.delivery_at ASC
     LIMIT 1
@@ -404,10 +442,7 @@ const sendGarlandReminder = (req, res) => {
             });
         }
         const message = `🌸 Reminder: Your garland order #${orderId} is scheduled for ${deliveryDate.toLocaleString("en-IN")}`;
-        db_1.default.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
-            row.user_id,
-            message,
-        ]);
+        createOrderNotification(row.user_id, message);
         const adminMail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
         Promise.all([
             row.email
@@ -430,8 +465,8 @@ const sendGarlandReminder = (req, res) => {
         })
             .finally(() => {
             db_1.default.query(`UPDATE garland_order_schedule
-           SET reminder_sent = 1, last_reminder_at = NOW()
-           WHERE order_id = ?`, [orderId]);
+           SET \`reminder sent\` = 1, \`last reminder at\` = NOW()
+           WHERE \`order id\` = ?`, [orderId]);
             return res.json({ success: true, message: "Reminder sent" });
         });
     });
@@ -445,15 +480,17 @@ const getUserOrders = (req, res) => {
     const sql = `
     SELECT 
       o.id AS orderId,
-      o.total_amount,
+      o.\`total amount\` AS total_amount,
       o.delivery_fee,
+      o.delivery_otp,
       o.status,
       o.tracking_status,
-      o.cancel_reason,
-      o.created_at,
-      o.picked_at,
+      o.delivery_status,
+      o.\`cancel reason\` AS cancel_reason,
+      o.\`created at\` AS created_at,
+      o.\`picked at\` AS picked_at,
       o.out_for_delivery_at,
-      o.delivered_at,
+      o.\`delivered at\` AS delivered_at,
 
       oi.id AS item_id,
       oi.product_name,
@@ -463,8 +500,8 @@ const getUserOrders = (req, res) => {
       oi.image
 
     FROM orders o
-    LEFT JOIN order_items oi ON oi.order_id = o.id
-    WHERE o.user_id = ?
+    LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+    WHERE o.\`user id\` = ?
     ORDER BY o.id DESC
   `;
     db_1.default.query(sql, [userId], (err, rows) => {
@@ -479,8 +516,10 @@ const getUserOrders = (req, res) => {
                     orderId: row.orderId,
                     total_amount: Number(row.total_amount),
                     delivery_fee: Number(row.delivery_fee),
+                    delivery_otp: row.delivery_otp || null,
                     status: row.status,
                     tracking_status: row.tracking_status,
+                    delivery_status: row.delivery_status,
                     cancel_reason: row.cancel_reason,
                     created_at: row.created_at,
                     picked_at: row.picked_at,
@@ -504,70 +543,145 @@ const getUserOrders = (req, res) => {
 };
 exports.getUserOrders = getUserOrders;
 /* ======================================================
-   ✅ ADMIN CONFIRM ORDER
+   ✅ ADMIN ORDER LIFECYCLE ACTION
 ====================================================== */
 const confirmOrder = (req, res) => {
     const orderId = Number(req.params.orderId);
+    const action = (req.body.action || "").toUpperCase();
     if (!orderId)
         return res.status(400).json({ message: "Invalid order id" });
-    getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
-        if (statusErr) {
+    if (!action)
+        return res.status(400).json({ message: "Action is required" });
+    db_1.default.query("SELECT `status`, `delivery_status` FROM `orders` WHERE `id` = ?", [orderId], (statusErr, statusRows) => {
+        if (statusErr || statusRows.length === 0) {
             return res.status(404).json({ message: "Order not found" });
         }
-        if (currentStatus !== "PENDING") {
-            return res.status(409).json({
-                message: `Order already processed (${currentStatus}). Confirm allowed only once from PENDING.`,
-            });
+        const { status, delivery_status } = statusRows[0];
+        let updates = [];
+        let params = [];
+        let requireEmailAndNotif = false;
+        switch (action) {
+            case "CONFIRM":
+                if (status !== "PENDING") {
+                    return res.status(409).json({ message: `Order already processed (${status}). Confirm allowed only once from PENDING.` });
+                }
+                updates.push("`status` = ?", "`delivery_status` = ?");
+                params.push("ACCEPTED", "PENDING");
+                requireEmailAndNotif = true;
+                break;
+            case "PICK":
+                if (status !== "ACCEPTED" || delivery_status !== "PENDING") {
+                    return res.status(409).json({ message: `Order cannot be picked from current state (status: ${status}, delivery: ${delivery_status}).` });
+                }
+                updates.push("`delivery_status` = ?", "`picked at` = NOW()");
+                params.push("PICKED");
+                break;
+            case "OUT_FOR_DELIVERY":
+                if (delivery_status !== "PICKED") {
+                    return res.status(409).json({ message: `Order cannot be out for delivery from current state (${delivery_status}).` });
+                }
+                updates.push("`delivery_status` = ?", "`out_for_delivery_at` = NOW()");
+                params.push("OUT_FOR_DELIVERY");
+                break;
+            case "DELIVERED":
+                if (delivery_status !== "OUT_FOR_DELIVERY") {
+                    return res.status(409).json({ message: `Order cannot be delivered from current state (${delivery_status}).` });
+                }
+                updates.push("`status` = ?", "`delivery_status` = ?", "`delivered at` = NOW()");
+                params.push("DELIVERED", "DELIVERED");
+                break;
+            default:
+                return res.status(400).json({ message: "Invalid action" });
         }
-        const sql = `
-      SELECT 
-        o.id,
-        o.user_id,
-        o.total_amount,
-        o.delivery_fee,
-        u.email,
-        u.username,
-
-        oi.id AS item_id,
-        oi.product_name,
-        oi.unit_price,
-        oi.weight,
-        oi.total_price,
-        oi.image
-
-      FROM orders o
-      JOIN users u ON u.id = o.user_id
-      LEFT JOIN order_items oi ON oi.order_id = o.id
-      WHERE o.id = ?
-    `;
-        db_1.default.query(sql, [orderId], async (err, rows) => {
-            if (err || rows.length === 0) {
-                console.error("❌ Confirm fetch error:", err);
-                return res.status(404).json({ message: "Order not found" });
+        params.push(orderId);
+        const sqlUpdate = `UPDATE \`orders\` SET ${updates.join(", ")} WHERE \`id\` = ?`;
+        db_1.default.query(sqlUpdate, params, async (updateErr) => {
+            if (updateErr) {
+                console.error("❌ Order lifecycle update error:", updateErr);
+                return res.status(500).json({ message: "Database update failed" });
             }
-            const items = rows
-                .filter((r) => r.item_id)
-                .map((r) => ({
-                product_name: r.product_name,
-                unit_price: Number(r.unit_price),
-                weight: Number(r.weight),
-                total_price: Number(r.total_price),
-                image: r.image,
-            }));
-            const order = rows[0];
-            updateStatus(orderId, "CONFIRMED", "CONFIRMED");
-            db_1.default.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
-                order.user_id,
-                `✅ Order #${orderId} confirmed`,
-            ]);
-            try {
-                await (0, mailer_1.sendOrderConfirmMail)(order.email, order.username, orderId, Number(order.total_amount), Number(order.delivery_fee || 0), items);
-                return res.json({ success: true });
-            }
-            catch (mailErr) {
-                console.error("❌ Mail failed:", mailErr);
-                return res.status(500).json({ message: "Mail failed" });
-            }
+            /* ── Fetch the customer's user id for notification targeting ── */
+            const getCustomerSql = "SELECT `user id` AS customerId FROM orders WHERE id = ?";
+            db_1.default.query(getCustomerSql, [orderId], (custErr, custResult) => {
+                const targetCustomerId = (!custErr && custResult?.length) ? Number(custResult[0].customerId) : null;
+                /* ── CONFIRM action: send email + notification ── */
+                if (requireEmailAndNotif && targetCustomerId) {
+                    const sqlSelect = `
+              SELECT 
+                o.id,
+                o.\`user id\` AS user_id,
+                o.\`total amount\` AS total_amount,
+                o.delivery_fee,
+                u.email,
+                u.username,
+                oi.id AS item_id,
+                oi.product_name,
+                oi.unit_price,
+                oi.weight,
+                oi.total_price,
+                oi.image
+              FROM orders o
+              JOIN users u ON u.id = o.\`user id\`
+              LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+              WHERE o.id = ?
+            `;
+                    db_1.default.query(sqlSelect, [orderId], async (err, rows) => {
+                        if (!err && rows.length > 0) {
+                            const items = rows
+                                .filter((r) => r.item_id)
+                                .map((r) => ({
+                                product_name: r.product_name,
+                                unit_price: Number(r.unit_price),
+                                weight: Number(r.weight),
+                                total_price: Number(r.total_price),
+                                image: r.image,
+                            }));
+                            const order = rows[0];
+                            try {
+                                await (0, mailer_1.sendOrderConfirmMail)(order.email, order.username, orderId, Number(order.total_amount), Number(order.delivery_fee || 0), items);
+                            }
+                            catch (mailErr) {
+                                console.error("❌ Mail failed:", mailErr);
+                            }
+                            createOrderNotification(targetCustomerId, `✅ Your Order #${orderId} has been confirmed by admin and is ready for packaging!`);
+                        }
+                    });
+                }
+                /* ── PICK / OUT_FOR_DELIVERY / DELIVERED: inject notification ── */
+                if (!requireEmailAndNotif && targetCustomerId) {
+                    let notificationMsg = "";
+                    switch (action) {
+                        case "PICK":
+                            notificationMsg = `📦 Order #${orderId} has been updated: PICKED and is packaging for transit!`;
+                            break;
+                        case "OUT_FOR_DELIVERY":
+                            notificationMsg = `🛵 Order #${orderId} status updated: OUT_FOR_DELIVERY is on the way!`;
+                            break;
+                        case "DELIVERED":
+                            notificationMsg = `✅ Order #${orderId} status updated: DELIVERED successfully to doorstep!`;
+                            break;
+                        default:
+                            console.log("ℹ️ No notification generated for lifecycle action:", action);
+                    }
+                    if (notificationMsg) {
+                        const insertNotifSql = "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)";
+                        db_1.default.query(insertNotifSql, [targetCustomerId, notificationMsg], (notifErr) => {
+                            if (notifErr)
+                                console.error("❌ Critical notification DB injection failure:", notifErr);
+                            else
+                                console.log(`🔔 Notification row successfully written for action: ${action}`);
+                        });
+                    }
+                }
+                /* ── Return updated order to sync frontend state ── */
+                const selectUpdatedOrderSql = `SELECT id AS orderId, status, delivery_status, \`picked at\` AS picked_at, out_for_delivery_at, \`delivered at\` AS delivered_at FROM orders WHERE id = ?`;
+                db_1.default.query(selectUpdatedOrderSql, [orderId], (err, rowArray) => {
+                    if (err || rowArray.length === 0) {
+                        return res.json({ success: true, message: `Action ${action} executed successfully` });
+                    }
+                    return res.json({ success: true, message: `Action ${action} executed successfully`, order: rowArray[0] });
+                });
+            });
         });
     });
 };
@@ -586,34 +700,232 @@ const updateOrderStatus = (req, res) => {
         PICKED: "OUT_FOR_DELIVERY",
         OUT_FOR_DELIVERY: "DELIVERED",
     };
-    getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
-        if (statusErr || !currentStatus) {
-            return res.status(404).json({ message: "Order not found" });
+    /* ── STEP 1: Retrieve the actual customer's user id from the order ── */
+    const getOrderSql = "SELECT `user id` AS customerId FROM orders WHERE id = ?";
+    db_1.default.query(getOrderSql, [orderId], (orderErr, orderResult) => {
+        if (orderErr || !orderResult || orderResult.length === 0) {
+            return res.status(404).json({ success: false, message: "Order context not found" });
         }
-        const expectedNext = nextStatusMap[currentStatus];
-        if (!expectedNext) {
-            return res.status(409).json({
-                message: `Cannot update status from ${currentStatus}`,
+        const targetCustomerId = Number(orderResult[0].customerId);
+        /* ── Validate transition ── */
+        getCurrentOrderStatus(orderId, (statusErr, currentStatus) => {
+            if (statusErr || !currentStatus) {
+                return res.status(404).json({ message: "Order not found" });
+            }
+            const expectedNext = nextStatusMap[currentStatus];
+            if (!expectedNext) {
+                return res.status(409).json({
+                    message: `Cannot update status from ${currentStatus}`,
+                });
+            }
+            if (requestedStatus !== expectedNext) {
+                return res.status(409).json({
+                    message: `Invalid transition. Allowed next status is ${expectedNext}.`,
+                });
+            }
+            /* ── Build time-stamp field ── */
+            let timeField;
+            if (requestedStatus === "PICKED")
+                timeField = "`picked at`";
+            if (requestedStatus === "OUT_FOR_DELIVERY")
+                timeField = "out_for_delivery_at";
+            if (requestedStatus === "DELIVERED")
+                timeField = "`delivered at`";
+            /* ── Execute the status update ── */
+            let sql = `UPDATE orders SET status=?, tracking_status=?`;
+            const params = [requestedStatus, requestedStatus];
+            if (timeField) {
+                sql += `, ${timeField}=NOW()`;
+            }
+            sql += ` WHERE id=?`;
+            params.push(orderId);
+            db_1.default.query(sql, params, (updateErr) => {
+                if (updateErr) {
+                    console.error("❌ updateOrderStatus DB error:", updateErr);
+                    return res.status(500).json({ success: false, message: "Database update failed" });
+                }
+                /* ── STEP 2: Inject notification using switch on statusKey ── */
+                const statusKey = String(requestedStatus).toUpperCase();
+                let notificationMsg = "";
+                switch (statusKey) {
+                    case "CONFIRMED":
+                    case "READY":
+                        notificationMsg = `✅ Your Order #${orderId} has been confirmed by admin and is ready for packaging!`;
+                        break;
+                    case "PICKED":
+                        notificationMsg = `📦 Order #${orderId} has been updated: PICKED and is packaging for transit!`;
+                        break;
+                    case "OUT_FOR_DELIVERY":
+                        notificationMsg = `🛵 Order #${orderId} status updated: OUT_FOR_DELIVERY is on the way!`;
+                        break;
+                    case "DELIVERED":
+                        notificationMsg = `✅ Order #${orderId} status updated: DELIVERED successfully to doorstep!`;
+                        break;
+                    default:
+                        console.log("ℹ️ No background message generated for status:", statusKey);
+                }
+                if (notificationMsg) {
+                    const insertNotifSql = "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)";
+                    db_1.default.query(insertNotifSql, [targetCustomerId, notificationMsg], (notifErr) => {
+                        if (notifErr)
+                            console.error("❌ Critical notification DB injection failure:", notifErr);
+                        else
+                            console.log(`🔔 Notification row successfully written for action: ${statusKey}`);
+                    });
+                }
+                return res.json({ success: true, message: `Order #${orderId} updated to ${requestedStatus}` });
             });
-        }
-        if (requestedStatus !== expectedNext) {
-            return res.status(409).json({
-                message: `Invalid transition. Allowed next status is ${expectedNext}.`,
-            });
-        }
-        let timeField;
-        if (requestedStatus === "PICKED")
-            timeField = "picked_at";
-        if (requestedStatus === "OUT_FOR_DELIVERY")
-            timeField = "out_for_delivery_at";
-        if (requestedStatus === "DELIVERED")
-            timeField = "delivered_at";
-        updateStatus(orderId, requestedStatus, requestedStatus, timeField);
-        db_1.default.query("INSERT INTO notifications (user_id,message) SELECT user_id, ? FROM orders WHERE id=?", [`📦 Order #${orderId} updated → ${requestedStatus}`, orderId]);
-        return res.json({ success: true });
+        });
     });
 };
 exports.updateOrderStatus = updateOrderStatus;
+/* ======================================================
+   🔄 UNIFIED UPDATE STATUS (ADMIN & DELIVERY)
+   PUT /api/orders/:id/status
+====================================================== */
+const updateOrderStatusUnified = (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!orderId) {
+        return res.status(400).json({ success: false, message: "Invalid order id" });
+    }
+    const userRole = req.user?.role;
+    const userId = req.user?.id;
+    // Fetch current order state
+    db_1.default.query("SELECT status, delivery_status, delivery_partner_id, delivery_otp, `user id` FROM orders WHERE id = ? LIMIT 1", [orderId], (err, rows) => {
+        if (err) {
+            console.error("❌ Fetch order error:", err);
+            return res.status(500).json({ success: false, message: "Database error" });
+        }
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
+        const currentOrder = rows[0];
+        const currentStatus = (currentOrder.status || "").toUpperCase();
+        const customerUserId = currentOrder["user id"];
+        // Determine requested status and delivery_status
+        let requestedStatus = normalizeStatus(req.body.status);
+        let requestedDeliveryStatus = normalizeStatus(req.body.delivery_status || req.body.status);
+        // Foolproof transition: PENDING to ACCEPTED automatic rules
+        if (currentStatus === "PENDING" && (requestedStatus === "ACCEPTED" || requestedStatus === "CONFIRMED")) {
+            requestedStatus = "ACCEPTED";
+            requestedDeliveryStatus = "PENDING_PICKUP";
+        }
+        // Determine delivery_partner_id
+        let partnerId = currentOrder.delivery_partner_id;
+        if (userRole === "DELIVERY") {
+            partnerId = userId;
+        }
+        else if (req.body.delivery_partner_id !== undefined) {
+            partnerId = req.body.delivery_partner_id ? Number(req.body.delivery_partner_id) : null;
+        }
+        // OTP validation if transitioning to DELIVERED and delivery partner is handling it
+        if (requestedDeliveryStatus === "DELIVERED") {
+            if (currentOrder.delivery_partner_id || userRole === "DELIVERY") {
+                const submittedOtp = req.body.otp;
+                const storedOtp = currentOrder.delivery_otp;
+                if (!storedOtp) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "No OTP found. Order must be OUT_FOR_DELIVERY first."
+                    });
+                }
+                if (!submittedOtp || String(submittedOtp).trim() !== String(storedOtp).trim()) {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Invalid OTP. Please enter the correct delivery code from the customer."
+                    });
+                }
+            }
+        }
+        // Update status SQL query must strictly use the structure:
+        // UPDATE orders SET status = ?, delivery_status = ?, delivery_partner_id = ? WHERE id = ?
+        const updateSql = "UPDATE orders SET status = ?, delivery_status = ?, delivery_partner_id = ? WHERE id = ?";
+        db_1.default.query(updateSql, [requestedStatus, requestedDeliveryStatus, partnerId, orderId], (updateErr) => {
+            if (updateErr) {
+                console.error("❌ updateOrderStatusUnified error:", updateErr);
+                return res.status(500).json({ success: false, message: "Failed to update order status" });
+            }
+            // Driver-specific status flow rules for timestamps
+            let generatedOtp = "";
+            if (requestedDeliveryStatus === "PICKED") {
+                db_1.default.query("UPDATE orders SET `picked at` = NOW() WHERE id = ?", [orderId]);
+            }
+            else if (requestedDeliveryStatus === "OUT_FOR_DELIVERY") {
+                generatedOtp = String(Math.floor(1000 + Math.random() * 9000));
+                db_1.default.query("UPDATE orders SET out_for_delivery_at = NOW(), delivery_otp = ? WHERE id = ?", [generatedOtp, orderId]);
+            }
+            else if (requestedDeliveryStatus === "DELIVERED") {
+                db_1.default.query("UPDATE orders SET `delivered at` = NOW(), delivery_otp = NULL WHERE id = ?", [orderId]);
+            }
+            // Handle PENDING -> ACCEPTED (PENDING_PICKUP) mail & notifications
+            if (currentStatus === "PENDING" && requestedStatus === "ACCEPTED") {
+                const confirmFetchSql = `
+            SELECT 
+              o.id,
+              o.\`user id\` AS user_id,
+              o.\`total amount\` AS total_amount,
+              o.delivery_fee,
+              u.email,
+              u.username,
+              oi.id AS item_id,
+              oi.product_name,
+              oi.unit_price,
+              oi.weight,
+              oi.total_price,
+              oi.image
+            FROM orders o
+            JOIN users u ON u.id = o.\`user id\`
+            LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+            WHERE o.id = ?
+          `;
+                db_1.default.query(confirmFetchSql, [orderId], async (fetchErr, rows) => {
+                    if (!fetchErr && rows.length > 0) {
+                        const items = rows
+                            .filter((r) => r.item_id)
+                            .map((r) => ({
+                            product_name: r.product_name,
+                            unit_price: Number(r.unit_price),
+                            weight: Number(r.weight),
+                            total_price: Number(r.total_price),
+                            image: r.image,
+                        }));
+                        const order = rows[0];
+                        createOrderNotification(order.user_id, `✅ Order #${orderId} confirmed and is being prepared!`);
+                        try {
+                            await (0, mailer_1.sendOrderConfirmMail)(order.email, order.username, orderId, Number(order.total_amount), Number(order.delivery_fee || 0), items);
+                        }
+                        catch (mailErr) {
+                            console.error("❌ Mail failed in unified updater:", mailErr);
+                        }
+                    }
+                });
+            }
+            else {
+                // Send normal notifications
+                const statusEmoji = {
+                    PICKED: "📦",
+                    OUT_FOR_DELIVERY: "🛵",
+                    DELIVERED: "✅",
+                };
+                const notifMsg = `${statusEmoji[requestedDeliveryStatus] || "📦"} Order #${orderId} → ${requestedDeliveryStatus.replace("_", " ")}`;
+                createOrderNotification(customerUserId, notifMsg);
+                if (requestedDeliveryStatus === "OUT_FOR_DELIVERY" && generatedOtp) {
+                    createOrderNotification(customerUserId, `🔐 Your delivery OTP for Order #${orderId} is ${generatedOtp}. Share this code with the delivery partner to confirm delivery.`);
+                }
+            }
+            return res.json({
+                success: true,
+                message: `Order #${orderId} updated to status ${requestedStatus} and delivery_status ${requestedDeliveryStatus}`,
+                data: {
+                    orderId,
+                    status: requestedStatus,
+                    delivery_status: requestedDeliveryStatus
+                }
+            });
+        });
+    });
+};
+exports.updateOrderStatusUnified = updateOrderStatusUnified;
 /* ======================================================
    ❌ ADMIN CANCEL ORDER
 ====================================================== */
@@ -633,8 +945,13 @@ const adminCancelOrder = (req, res) => {
             });
         }
         updateStatus(orderId, "CANCELLED", "CANCELLED");
-        db_1.default.query("UPDATE orders SET cancel_reason=? WHERE id=?", [reason, orderId]);
-        db_1.default.query("INSERT INTO notifications (user_id,message) SELECT user_id, ? FROM orders WHERE id=?", [`❌ Order #${orderId} cancelled: ${reason}`, orderId]);
+        db_1.default.query("UPDATE orders SET `cancel reason`=? WHERE id=?", [reason, orderId]);
+        // Notify customer of cancellation
+        getCurrentOrderStatus(orderId, (notifErr, _status, notifUserId) => {
+            if (!notifErr && notifUserId) {
+                createOrderNotification(notifUserId, `❌ Order #${orderId} cancelled: ${reason}`);
+            }
+        });
         return res.json({ success: true });
     });
 };
@@ -658,12 +975,9 @@ const userCancelOrder = (req, res) => {
             });
         }
         updateStatus(orderId, "CANCELLED", "CANCELLED");
-        db_1.default.query("UPDATE orders SET cancel_reason=? WHERE id=?", [reason, orderId]);
+        db_1.default.query("UPDATE orders SET `cancel reason`=? WHERE id=?", [reason, orderId]);
         const adminMessage = `⚠ User cancelled order #${orderId}. Reason: ${reason}`;
-        db_1.default.query("INSERT INTO notifications (user_id,message) VALUES (?,?)", [
-            1,
-            adminMessage,
-        ]);
+        createOrderNotification(1, adminMessage);
         transporter.sendMail({
             to: process.env.ADMIN_EMAIL || process.env.EMAIL_USER,
             subject: `Order Cancelled (#${orderId})`,

@@ -1,13 +1,39 @@
 import mysql from "mysql2";
+import dotenv from "dotenv";
 
-const db = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "villages_vmuser",
-  password: process.env.DB_PASSWORD || "Mohan@1105",
-  database: process.env.DB_NAME || "villages_villagemart_db",
+dotenv.config();
+
+const poolOptions: any = {
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0,
+  queueLimit: 0
+};
+
+const hostValue = process.env.DB_HOST || "127.0.0.1";
+
+// 🎯 CRITICAL REFACTOR: Safely switch parameters if using Google Cloud UNIX Sockets
+if (hostValue.startsWith("/cloudsql/")) {
+  poolOptions.socketPath = hostValue; 
+  console.log(`🌐 Production Database Activated: Bound to UNIX Domain Socket: ${poolOptions.socketPath}`);
+} else {
+  poolOptions.host = hostValue;
+  poolOptions.port = Number(process.env.DB_PORT || 3306);
+  console.log(`💻 Local Development Database Activated: Connected via TCP Port: ${poolOptions.host}:${poolOptions.port}`);
+}
+
+const db = mysql.createPool(poolOptions);
+
+// Self-verifying pool check upon service instantiation
+db.getConnection((err, connection) => {
+  if (err) {
+    console.error("❌ CRITICAL SQL AUTHENTICATION ERROR:", err.message);
+  } else {
+    console.log("🎉 SUCCESS: Secure communication channel verified and established with Google Cloud SQL!");
+    connection.release();
+  }
 });
 
 export default db;

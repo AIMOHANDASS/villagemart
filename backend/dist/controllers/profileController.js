@@ -12,7 +12,8 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const getProfile = (req, res) => {
     const { id } = req.params;
     db_1.default.query(`SELECT id, name, username, email, phone, address,
-            latitude, longitude, profile_image
+            latitude, longitude, profile_image,
+            \`dark mode\` AS dark_mode, is_private, hide_phone, \`hide address\` AS hide_address
      FROM users WHERE id = ?`, [id], (err, rows) => {
         if (err)
             return res.status(500).json({ message: "DB error" });
@@ -79,10 +80,10 @@ const updateSettings = (req, res) => {
     const { id } = req.params;
     const { dark_mode, is_private, hide_phone, hide_address } = req.body;
     db_1.default.query(`UPDATE users SET
-      dark_mode=?,
+      \`dark mode\`=?,
       is_private=?,
       hide_phone=?,
-      hide_address=?
+      \`hide address\`=?
      WHERE id=?`, [dark_mode, is_private, hide_phone, hide_address, id], (err) => {
         if (err)
             return res.status(500).json({ message: "DB error" });

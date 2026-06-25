@@ -1,0 +1,658 @@
+import { Request, Response } from "express";
+import db from "../db";
+import bcrypt from "bcryptjs";
+import { generateToken } from "../middleware/auth.middleware";
+import { transporter } from "../utils/mailer";
+
+export const triggerOrderNotification = (userId: number, textMessage: string) => {
+  const sql = "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)";
+  db.query(sql, [userId, textMessage], (err) => {
+    if (err) console.error("❌ Failed to log automated background notification row:", err);
+  });
+};
+
+/* ======================================================
+   🗂 ENSURE TRANSPORT PARTNERS TABLE EXISTS
+====================================================== */
+db.query(
+  `CREATE TABLE IF NOT EXISTS transport_partners (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    phone VARCHAR(15) UNIQUE NOT NULL,
+    email VARCHAR(100),
+    password VARCHAR(255) NOT NULL,
+    vehicle_type VARCHAR(50),
+    vehicle_number VARCHAR(20),
+    license_number VARCHAR(50),
+    \`is active\` TINYINT(1) DEFAULT 1,
+    \`is verified\` TINYINT(1) DEFAULT 0,
+    \`created at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    profile_image TEXT,
+    \`document url\` TEXT,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending'
+  )`,
+  (err) => {
+    if (err) console.error("❌ Could not ensure transport_partners table:", err);
+  }
+);
+
+/* ======================================================
+   🔐 SIGNUP TRANSPORT PARTNER
+   POST /api/transport-driver/signup
+====================================================== */
+export const signupTransportPartner = async (req: Request, res: Response) => {
+  const { name, email, phone, password, vehicle_type, vehicle_number, license_number } = req.body;
+
+  if (!name || !email || !phone || !password) {
+    return res.status(400).json({ success: false, message: "Name, email, phone, and password are required" });
+  }
+
+  const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+  const profile_image = files?.['profile_image']?.[0]?.filename || null;
+  const dl_document_url = files?.['dl_document']?.[0]?.filename || null;
+  const rc_document_url = files?.['rc_document']?.[0]?.filename || null;
+  const aadhaar_document_url = files?.['aadhaar_document']?.[0]?.filename || null;
+
+  try {
+    const checkSql = "SELECT id FROM transport_partners WHERE email = ? LIMIT 1";
+    db.query(checkSql, [email], async (checkErr: any, rows: any[]) => {
+      if (checkErr) return res.status(500).json({ success: false, message: "Database error" });
+      if (rows.length > 0) return res.status(409).json({ success: false, message: "Email already exists" });
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const sql = `
+        INSERT INTO transport_partners 
+        (name, phone, email, password, vehicle_type, vehicle_number, license_number, profile_image, dl_document_url, rc_document_url, aadhaar_document_url, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      `;
+      
+      db.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, profile_image, dl_document_url, rc_document_url, aadhaar_document_url], (err: any, result: any) => {
+        if (err) {
+          console.error("❌ Transport Partner Signup DB Error:", err);
+          return res.status(500).json({ success: false, message: `Signup failed: ${err.message}` });
+        }
+        return res.status(201).json({ success: true, message: "Transport partner registered successfully" });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/* ======================================================
+   🔐 LOGIN TRANSPORT PARTNER
+   POST /api/transport-driver/login
+====================================================== */
+export const loginTransportPartner = (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: "Email and password are required" });
+  }
+
+  db.query("SELECT * FROM transport_partners WHERE email = ? LIMIT 1", [email], async (err: any, rows: any[]) => {
+    if (err) return res.status(500).json({ success: false, message: "Database error" });
+    if (rows.length === 0) return res.status(401).json({ success: false, message: "Invalid credentials" });
+
+    const partner = rows[0];
+    const isMatch = await bcrypt.compare(password, partner.password);
+    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials" });
+
+    // ✅ Enforce approval status
+    if (partner.status !== "approved") {
+      return res.status(403).json({
+        success: false,
+        message: "Waiting for admin approval",
+        status: partner.status
+      });
+    }
+
+    const token = generateToken({ id: partner.id, username: partner.name, role: "TRANSPORT" });
+    delete partner.password;
+
+    return res.json({
+      success: true,
+      message: "Login successful",
+      token,
+      role: "TRANSPORT",
+      user_id: partner.id,
+      status: partner.status,
+      data: partner,
+    });
+  });
+};
+
+/* ======================================================
+   🚗 GET AVAILABLE RIDE BOOKINGS FOR DRIVER
+   GET /api/transport-driver/bookings
+====================================================== */
+export const getDriverBookings = (req: Request, res: Response) => {
+  const partnerId = (req as any).user?.id;
+  const statusFilter = req.query.status
+    ? String(req.query.status).toUpperCase()
+    : null;
+
+  const checkLockoutSql = `SELECT wallet_balance, commission_due_since FROM transport_partners WHERE id = ?`;
+  db.query(checkLockoutSql, [partnerId], (lockErr, partnerResults: any) => {
+    if (lockErr) return res.status(500).json({ success: false, error: lockErr.message });
+
+    if (partnerResults.length > 0) {
+      const { wallet_balance, commission_due_since } = partnerResults[0];
+      if (wallet_balance < 0 && commission_due_since) {
+        const hoursElapsed = (new Date().getTime() - new Date(commission_due_since).getTime()) / (1000 * 60 * 60);
+        if (hoursElapsed >= 30) {
+          return res.status(402).json({
+            success: false,
+            isLockedOut: true,
+            message: "Ride Stream Locked: Settle outstanding commission balances to clear your application dashboard.",
+            walletBalance: wallet_balance,
+            hoursElapsed: Math.floor(hoursElapsed)
+          });
+        }
+      }
+    }
+
+    let sql = `
+      SELECT
+        tb.id,
+        tb.\`user id\` AS user_id,
+        tb.customer_name,
+        tb.customer_phone,
+        tb.from_address,
+        tb.\`from lat\` AS from_lat,
+        tb.from_Ing AS from_lng,
+        tb.\`to address\` AS to_address,
+        tb.\`to lat\` AS to_lat,
+        tb.\`to Ing\` AS to_lng,
+        tb.\`distance km\` AS distance_km,
+        tb.charge_amount,
+        tb.status,
+        tb.notes,
+        tb.\`created at\` AS created_at,
+        tb.vehicle_type,
+        u.username,
+        u.email
+      FROM transport_bookings tb
+      JOIN users u ON u.id = tb.\`user id\`
+    `;
+
+    const params: any[] = [];
+
+    if (statusFilter) {
+      sql += ` WHERE UPPER(tb.status) = ?`;
+      params.push(statusFilter);
+    } else {
+      sql += ` WHERE UPPER(tb.status) = 'BOOKED' OR UPPER(tb.status) = 'PENDING'`;
+    }
+
+    sql += ` ORDER BY tb.\`created at\` DESC`;
+
+    db.query(sql, params, (err: any, rows: any[]) => {
+      if (err) {
+        console.error("❌ getDriverBookings error:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to fetch bookings",
+          data: [],
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: rows || [],
+      });
+    });
+  });
+};
+
+/* ======================================================
+   🚗 GET MY ACTIVE RIDE
+   GET /api/transport-driver/my-active-ride
+====================================================== */
+export const getMyActiveRide = (req: Request, res: Response) => {
+  const driverId = (req as any).user?.id;
+  if (!driverId) return res.status(401).json({ success: false, message: "Driver not authenticated" });
+
+  const sql = `
+    SELECT
+      tb.id,
+      tb.\`user id\` AS user_id,
+      tb.customer_name,
+      tb.customer_phone,
+      tb.from_address,
+      tb.\`from lat\` AS from_lat,
+      tb.from_Ing AS from_lng,
+      tb.\`to address\` AS to_address,
+      tb.\`to lat\` AS to_lat,
+      tb.\`to Ing\` AS to_lng,
+      tb.\`distance km\` AS distance_km,
+      tb.charge_amount,
+      tb.status,
+      tb.ride_status,
+      tb.notes,
+      tb.\`created at\` AS created_at,
+      tb.vehicle_type
+    FROM transport_bookings tb
+    WHERE tb.driver_id = ? AND tb.ride_status IN ('ACCEPTED', 'STARTED') AND tb.status != 'COMPLETED'
+    ORDER BY tb.id DESC LIMIT 1
+  `;
+
+  db.query(sql, [driverId], (err: any, rows: any[]) => {
+    if (err) return res.status(500).json({ success: false, message: "Database error" });
+    return res.json({ success: true, data: rows.length ? rows[0] : null });
+  });
+};
+
+/* ======================================================
+   🚗 ACCEPT RIDE
+   POST /api/transport-driver/accept/:rideId
+====================================================== */
+export const acceptRide = (req: Request, res: Response) => {
+  const rideId = Number(req.params.rideId);
+  const driverId = (req as any).user?.id; // Logged-in driver ID from verified token payload
+
+  if (!rideId || !driverId) {
+    return res.status(400).json({ success: false, message: "Invalid request parameters" });
+  }
+
+  // 1. Ensure the ride is still unassigned ('BOOKED') to prevent double booking race-conditions
+  const selectBookingSql = "SELECT * FROM `transport_bookings` WHERE id = ? AND `ride_status` = 'BOOKED'";
+  
+  db.query(selectBookingSql, [rideId], (err: any, bookings: any[]) => {
+    if (err) return res.status(500).json({ success: false, error: err.message });
+    if (bookings.length === 0) {
+      return res.status(400).json({ success: false, message: "Ride has already been accepted or is unavailable." });
+    }
+
+    const activeBooking = bookings[0];
+
+    // 2. Query the transport_partners table to fetch this specific driver's Name, Phone, and Vehicle Type 🎯
+    const selectDriverSql = "SELECT name, phone, vehicle_type FROM `transport_partners` WHERE id = ?";
+    
+    db.query(selectDriverSql, [driverId], (dErr: any, drivers: any[]) => {
+      if (dErr || drivers.length === 0) {
+        return res.status(500).json({ success: false, message: "Failed to resolve driver credentials." });
+      }
+
+      const driverProfile = drivers[0];
+      const driverName = driverProfile.name;
+      const driverPhone = driverProfile.phone;
+      const driverVehicle = String(driverProfile.vehicle_type || "").toLowerCase().trim();
+      const requestedVehicle = String(activeBooking.vehicle_type || "").toLowerCase().trim();
+
+      // 🎯 CRITICAL SECURITY GATEWAY: Enforce case-insensitive fleet matching validation
+      if (driverVehicle && requestedVehicle && driverVehicle !== requestedVehicle) {
+        console.warn(`🚨 Security Violation Blocked: Driver #${driverId} (${driverVehicle}) attempted to take a ${requestedVehicle} order.`);
+        return res.status(403).json({ 
+          success: false, 
+          message: `Mismatched Vehicle Type! You drive an ${driverVehicle.toUpperCase()}, but this is a ${requestedVehicle.toUpperCase()} order.` 
+        });
+      }
+
+      // 3. Atomically assign the driver and advance status states cleanly
+      // Note: we set both driver_id and `driver id` because previous columns might be named ambiguously
+      const updateBookingSql = `
+        UPDATE \`transport_bookings\` 
+        SET \`ride_status\` = 'ACCEPTED', \`status\` = 'CONFIRMED', driver_id = ?, \`driver id\` = ? 
+        WHERE id = ?
+      `;
+
+      db.query(updateBookingSql, [driverId, driverId, rideId], (upErr: any) => {
+        if (upErr) {
+          // Fallback if `driver id` column doesn't exist (some databases have just driver_id)
+          const fallbackSql = `UPDATE \`transport_bookings\` SET \`ride_status\` = 'ACCEPTED', \`status\` = 'CONFIRMED', driver_id = ? WHERE id = ?`;
+          db.query(fallbackSql, [driverId, rideId], (retryErr: any) => {
+             if (retryErr) return res.status(500).json({ success: false, error: retryErr.message });
+             finalizeAcceptance();
+          });
+        } else {
+          finalizeAcceptance();
+        }
+
+        function finalizeAcceptance() {
+          // 4. Look up the destination customer email to send out the localized confirmation alert
+          db.query("SELECT email FROM `users` WHERE id = ?", [activeBooking["user id"]], (uErr: any, users: any[]) => {
+            if (!uErr && users.length > 0) {
+              const customerEmail = users[0].email;
+              
+              // Build the clean custom message body containing the driver data points 🎯
+              const dispatchAlertText = `🚖 Your VillageMart ride #${rideId} is confirmed! Driver Name: ${driverName}, Driver Mobile No: ${driverPhone}. Your driver is currently heading to your pickup location.`;
+
+              // A. Trigger backend Nodemailer mailer instance
+              const mailOptions = {
+                from: process.env.EMAIL_USER || "noreply@villagemart.com",
+                to: customerEmail,
+                subject: `VillageMart Ride Confirmed - Booking #${rideId}`,
+                text: dispatchAlertText
+              };
+
+              transporter.sendMail(mailOptions).catch((mErr) => {
+                console.error("❌ Failed to dispatch booking email:", mErr.message);
+              });
+
+              // B. Inject a live tracking data row inside the user notification logs table
+              const insertNotificationSql = "INSERT INTO `notifications` (`user id`, message, `is read`) VALUES (?, ?, 0)";
+              db.query(insertNotificationSql, [activeBooking["user id"], dispatchAlertText], (nErr: any) => {
+                if (nErr) console.error("❌ Notification table sync failure:", nErr.message);
+              });
+            }
+          });
+
+          return res.status(200).json({ 
+            success: true, 
+            message: "Ride manual assignment and matching system updated successfully!",
+            driver: { name: driverName, phone: driverPhone }
+          });
+        }
+      });
+    });
+  });
+};
+
+/* ======================================================
+   🚗 UPDATE RIDE STATUS
+   PUT /api/transport-driver/status/:rideId
+   Body: { status: "COMPLETED" }
+   
+   NOTE: CONFIRMED → STARTED is BLOCKED here.
+   Drivers MUST use POST /verify-otp to start a ride.
+   This endpoint only allows STARTED → COMPLETED.
+====================================================== */
+export const updateRideStatus = (req: Request, res: Response) => {
+  const rideId = Number(req.params.rideId);
+  const requestedStatus = (req.body?.status || "").toUpperCase();
+
+  if (!rideId || !requestedStatus) {
+    return res.status(400).json({ success: false, message: "Invalid data" });
+  }
+
+  // 🔐 SECURITY: STARTED transition is only allowed through OTP verification
+  if (requestedStatus === "STARTED") {
+    return res.status(403).json({
+      success: false,
+      message: "Cannot start ride via status update. Use OTP verification endpoint.",
+    });
+  }
+
+  const validStatuses = ["COMPLETED"];
+  if (!validStatuses.includes(requestedStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+    });
+  }
+
+  db.query(
+    "SELECT tb.status, tb.ride_status, tb.`user id`, tb.customer_name, u.email FROM transport_bookings tb JOIN users u ON u.id = tb.`user id` WHERE tb.id = ? LIMIT 1",
+    [rideId],
+    (err: any, rows: any[]) => {
+      if (err || !rows?.length) {
+        return res.status(404).json({ success: false, message: "Ride not found" });
+      }
+
+      const current = (rows[0].status || "").toUpperCase();
+
+      // Only allow STARTED → COMPLETED
+      if (current !== "STARTED") {
+        return res.status(409).json({
+          success: false,
+          message: `Invalid transition from ${current}. Ride must be STARTED to complete.`,
+        });
+      }
+
+      db.query(
+        "UPDATE transport_bookings SET status = 'COMPLETED', ride_status = 'COMPLETED' WHERE id = ?",
+        [rideId],
+        (updateErr: any) => {
+          if (updateErr) {
+            console.error("❌ updateRideStatus error:", updateErr);
+            return res.status(500).json({ success: false, message: "Failed to update status" });
+          }
+
+          // 🔔 Notify customer: ride completed
+          triggerOrderNotification(rows[0]["user id"], `🏁 Transport ride #${rideId} → COMPLETED. Thanks for riding with VillageMart!`);
+
+          if (rows[0].email) {
+            transporter.sendMail({
+              from: process.env.EMAIL_USER,
+              to: rows[0].email,
+              subject: "Thank You for Riding with VillageMart!",
+              text: `Hello ${rows[0].customer_name},\n\nYour journey is complete. Thank you for using VillageMart Ride! We look forward to traveling with you again soon.`
+            }).catch(e => console.error("Email error:", e));
+          }
+
+          return res.json({
+            success: true,
+            message: `Ride #${rideId} completed successfully`,
+            data: { rideId, status: "COMPLETED" },
+          });
+        }
+      );
+    }
+  );
+};
+
+/* ======================================================
+   🚗 VERIFY RIDE OTP & START RIDE
+   POST /api/transport-driver/verify-otp
+   Body: { rideId, otp }
+   
+   🔐 SECURITY: This is the ONLY path to move a ride
+   from CONFIRMED → STARTED. The 4-digit ride_otp must
+   match the pre-saved code from transport_bookings.
+====================================================== */
+export const verifyRideOtp = (req: Request, res: Response) => {
+  const { rideId, otp } = req.body;
+
+  if (!rideId || !otp) {
+    return res.status(400).json({ success: false, message: "Ride ID and OTP are required" });
+  }
+
+  if (String(otp).length !== 4) {
+    return res.status(400).json({ success: false, message: "OTP must be exactly 4 digits" });
+  }
+
+  db.query(
+    "SELECT ride_otp, ride_status, status, `user id` FROM transport_bookings WHERE id = ? LIMIT 1",
+    [Number(rideId)],
+    (err, rows: any[]) => {
+      if (err || !rows?.length) {
+        return res.status(404).json({ success: false, message: "Ride not found" });
+      }
+
+      const ride = rows[0];
+      const currentStatus = (ride.status || "").toUpperCase();
+
+      // Ensure ride is in CONFIRMED state (accepted by driver, not yet started)
+      if (currentStatus !== "CONFIRMED") {
+        return res.status(409).json({
+          success: false,
+          message: `Ride is in ${currentStatus} state. OTP verification only allowed for CONFIRMED rides.`,
+        });
+      }
+
+      // 🔐 CRITICAL: Validate the 4-digit OTP against the stored ride_otp
+      const storedOtp = String(ride.ride_otp || "").trim();
+      const submittedOtp = String(otp).trim();
+
+      if (!storedOtp) {
+        return res.status(400).json({
+          success: false,
+          message: "No OTP found for this ride. The booking may be incomplete.",
+        });
+      }
+
+      if (submittedOtp !== storedOtp) {
+        return res.status(403).json({
+          success: false,
+          message: "Invalid OTP. Please ask the passenger for the correct 4-digit code.",
+        });
+      }
+
+      // ✅ OTP matches — transition CONFIRMED → STARTED (sync both status columns)
+      db.query(
+        "UPDATE transport_bookings SET status = 'STARTED', ride_status = 'STARTED' WHERE id = ?",
+        [Number(rideId)],
+        (updateErr) => {
+          if (updateErr) {
+            console.error("❌ verifyRideOtp update error:", updateErr);
+            return res.status(500).json({ success: false, message: "Failed to start ride" });
+          }
+
+          // 🔔 Notify customer: ride has started
+          db.query(
+            "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)",
+            [ride["user id"], `🚗 Your ride #${rideId} has started! OTP verified successfully.`]
+          );
+
+          return res.json({ success: true, message: "OTP Verified! Ride started." });
+        }
+      );
+    }
+  );
+};
+
+/* ======================================================
+   📍 UPDATE DRIVER LOCATION
+   POST /api/transport-driver/location
+   Body: { lat, lng }
+====================================================== */
+export const updateDriverLocation = (req: Request, res: Response) => {
+  const driverId = (req as any).user?.id;
+  const { lat, lng } = req.body;
+
+  if (!driverId || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+    return res.status(400).json({ success: false, message: "Invalid location data" });
+  }
+
+  const sql = `
+    INSERT INTO partner_locations (partner_id, partner_type, latitude, longitude)
+    VALUES (?, 'transport', ?, ?)
+    ON DUPLICATE KEY UPDATE latitude = VALUES(latitude), longitude = VALUES(longitude), updated_at = NOW()
+  `;
+
+  db.query(sql, [driverId, Number(lat), Number(lng)], (err: any) => {
+    if (err) {
+      console.error("❌ updateDriverLocation error:", err);
+      return res.status(500).json({ success: false, message: "Failed to update location" });
+    }
+
+    return res.json({ success: true, message: "Location updated" });
+  });
+};
+
+/* ======================================================
+   💰 GET DRIVER EARNINGS
+   GET /api/transport-driver/earnings
+====================================================== */
+export const getDriverEarnings = (req: Request, res: Response) => {
+  const driverId = (req as any).user?.id;
+
+  if (!driverId) {
+    return res.status(401).json({ success: false, message: "Driver not authenticated", data: [] });
+  }
+
+  // ✅ FIXED: Filter by driver_id to only show this driver's rides
+  const sql = `
+    SELECT id, \`distance km\` AS distance_km, charge_amount, status, \`created at\` AS created_at
+    FROM transport_bookings
+    WHERE driver_id = ? AND status IN ('CONFIRMED', 'STARTED', 'COMPLETED')
+    ORDER BY \`created at\` DESC
+  `;
+
+  db.query(sql, [driverId], (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getDriverEarnings error:", err);
+      return res.status(500).json({ success: false, message: "Failed to fetch earnings", data: [] });
+    }
+
+    const all = (rows || []) as any[];
+    // 🚩 BUSINESS LOGIC: 10% Platform Commission
+    // Driver gets 90%
+    const COMMISSION_RATE = 0.9;
+
+    const totalEarnings = all.reduce((s: number, r: any) => s + (Number(r.charge_amount || 0) * COMMISSION_RATE), 0);
+    const totalRides = all.length;
+    const totalDistance = all.reduce((s: number, r: any) => s + Number(r.distance_km || 0), 0);
+
+    const today = new Date().toDateString();
+    const todayRides = all.filter((r: any) => new Date(r.created_at).toDateString() === today);
+    const todayEarnings = todayRides.reduce((s: number, r: any) => s + (Number(r.charge_amount || 0) * COMMISSION_RATE), 0);
+
+    return res.json({
+      success: true,
+      data: {
+        totalEarnings: Number(totalEarnings.toFixed(2)),
+        totalRides,
+        totalDistance: Number(totalDistance.toFixed(2)),
+        todayEarnings: Number(todayEarnings.toFixed(2)),
+        todayRides: todayRides.length,
+        rides: all,
+      },
+    });
+  });
+};
+
+/* ======================================================
+   🟢 TOGGLE ONLINE STATUS
+   POST /api/transport/toggle-online
+====================================================== */
+export const toggleTransportOnline = (req: any, res: any) => {
+  const driverId = (req as any).user?.id;
+  const { is_online } = req.body;
+
+  if (typeof is_online !== 'boolean') {
+    return res.status(400).json({ success: false, message: "is_online (boolean) required" });
+  }
+
+  db.query(
+    "UPDATE transport_partners SET `is active` = ? WHERE id = ?",
+    [is_online ? 1 : 0, driverId],
+    (err) => {
+      if (err) return res.status(500).json({ success: false, message: "Status update failed" });
+      res.json({ success: true, message: `Status updated to ${is_online ? 'online' : 'offline'}` });
+    }
+  );
+};
+
+/* ======================================================
+   🤖 AUTO-ASSIGN NEAREST DRIVER
+   Helper function (called during ride booking)
+====================================================== */
+export const autoAssignNearestDriver = (bookingId: number, fromLat: number, fromLng: number) => {
+  const sql = `
+    SELECT 
+      tp.id,
+      (6371 * acos(
+        cos(radians(?)) *
+        cos(radians(pl.latitude)) *
+        cos(radians(pl.longitude) - radians(?)) +
+        sin(radians(?)) *
+        sin(radians(pl.latitude))
+      )) AS distance
+    FROM transport_partners tp
+    JOIN partner_locations pl ON pl.partner_id = tp.id AND pl.partner_type = 'transport'
+    WHERE tp.status = 'approved' AND tp.\`is active\` = 1
+    HAVING distance < 10
+    ORDER BY distance ASC
+    LIMIT 1
+  `;
+
+  db.query(sql, [fromLat, fromLng, fromLat], (err, rows: any[]) => {
+    if (err || !rows?.length) {
+      console.log(`⚠️ No online drivers found for Ride #${bookingId}`);
+      return;
+    }
+
+    const driverId = rows[0].id;
+    const updateSql = "UPDATE transport_bookings SET driver_id = ?, status = 'CONFIRMED', ride_status = 'ACCEPTED' WHERE id = ?";
+    
+    db.query(updateSql, [driverId, bookingId], (updateErr) => {
+      if (!updateErr) {
+        console.log(`✅ Ride #${bookingId} auto-assigned to Driver #${driverId}`);
+        // Notify driver
+        db.query("INSERT INTO notifications (`user id`, message) VALUES (?, ?)", [driverId, `🚖 New Ride Request #${bookingId} assigned to you!`]);
+      }
+    });
+  });
+};

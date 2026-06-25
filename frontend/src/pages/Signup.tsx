@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../api";
 import FreeLocationPicker from "../components/FreeLocationPicker";
 import { GoogleLogin } from "@react-oauth/google";
+import { motion } from "framer-motion";
+import toast from "react-hot-toast";
 
 type Props = {
   onLogin: (u: any) => void;
@@ -106,7 +108,7 @@ export default function Signup({ onLogin }: Props) {
   /* ---------------- EMAIL OTP ---------------- */
   const sendEmailOtp = async () => {
     if (!form.email || !emailValid) {
-      alert("Enter valid email first");
+      toast.error("Enter valid email first");
       return;
     }
 
@@ -118,6 +120,7 @@ export default function Signup({ onLogin }: Props) {
 
     setEmailOtpModal(true);
     setEmailResendTimer(30);
+    toast.success("OTP sent to your email!");
   };
 
   const verifyEmailOtp = async () => {
@@ -130,8 +133,9 @@ export default function Signup({ onLogin }: Props) {
     if (res.ok) {
       setEmailVerified(true);
       setEmailOtpModal(false);
+      toast.success("Email verified! ✅");
     } else {
-      alert("Invalid Email OTP");
+      toast.error("Invalid Email OTP");
     }
   };
 
@@ -160,7 +164,7 @@ export default function Signup({ onLogin }: Props) {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/users/signup`, {
+      const res = await fetch(`${API_BASE_URL}/user/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -176,8 +180,21 @@ export default function Signup({ onLogin }: Props) {
         return;
       }
 
+      // ✅ 1. Cache JWT token FIRST — downstream components (Header, NotificationBell)
+      //    will fire authenticated API calls the moment React re-renders after onLogin.
+      //    If the token isn't in localStorage yet, those calls hit 401 → session wipe → logout loop.
+      if (data.token) localStorage.setItem("jwt_token", data.token);
+
+      // ✅ 2. Persist the complete user metadata object so page refreshes don't lose session
       localStorage.setItem("user", JSON.stringify(data.user));
+
+      // ✅ 3. Store role for any components that read it independently
+      if (data.role) localStorage.setItem("user_role", data.role);
+
+      // ✅ 4. Set React auth state — this triggers the app-wide re-render
       onLogin(data.user);
+
+      toast.success("Account created! 🎉");
       navigate("/");
     } catch {
       setError("Network error");
@@ -199,88 +216,183 @@ export default function Signup({ onLogin }: Props) {
 
       const data = await res.json();
       if (!res.ok) {
-        alert("Google signup failed");
+        toast.error("Google signup failed");
         return;
       }
 
       localStorage.setItem("user", JSON.stringify(data.user));
+      if (data.token) localStorage.setItem("jwt_token", data.token);
+      if (data.role) localStorage.setItem("user_role", data.role);
       onLogin(data.user);
+      toast.success("Welcome to VillageMart! 🎉");
       navigate("/");
     } catch {
-      alert("Google signup error");
+      toast.error("Google signup error");
     }
   };
 
+  const fieldLabels: Record<string, string> = {
+    name: "Full Name",
+    username: "Username",
+    email: "Email Address",
+    phone: "Phone Number",
+  };
+
   return (
-    <div className="min-h-screen flex justify-center bg-gradient-to-br from-blue-50 to-white p-4">
-      <form
+    <div className="min-h-screen flex justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4 py-8">
+      {/* Decorative */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-20 -right-20 w-64 h-64 bg-primary/5 rounded-full" />
+        <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-emerald-500/5 rounded-full" />
+      </div>
+
+      <motion.form
         onSubmit={handleSubmit}
-        className="max-w-xl w-full bg-white p-8 rounded-2xl shadow-xl border animate-fade-in"
+        className="relative max-w-xl w-full bg-white dark:bg-card p-8 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-800"
+        initial={{ opacity: 0, y: 30, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.5, type: "spring", stiffness: 200 }}
       >
-        <h2 className="text-3xl font-bold mb-6 text-center">
+        {/* Logo */}
+        <motion.div
+          className="flex justify-center mb-5"
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ delay: 0.2, type: "spring" }}
+        >
+          <div className="w-14 h-14 bg-gradient-to-br from-primary to-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary/30">
+            <span className="text-2xl">🌿</span>
+          </div>
+        </motion.div>
+
+        <motion.h2
+          className="text-2xl font-bold mb-1 text-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.25 }}
+        >
           Create Account
-        </h2>
+        </motion.h2>
+        <motion.p
+          className="text-sm text-muted-foreground text-center mb-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+        >
+          Join VillageMart and start shopping fresh
+        </motion.p>
 
         {error && (
-          <p className="mb-4 p-3 text-sm text-red-700 bg-red-100 rounded-lg animate-shake">
+          <motion.p
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 p-3 text-sm text-red-700 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800"
+          >
             {error}
-          </p>
+          </motion.p>
         )}
 
-        {["name", "username", "email", "phone"].map((f) => (
-          <input
+        {["name", "username", "email", "phone"].map((f, index) => (
+          <motion.div
             key={f}
-            name={f}
-            placeholder={f.toUpperCase()}
-            value={(form as any)[f]}
-            onChange={handleChange}
-            className="w-full p-3 mb-3 border rounded-xl"
-            required
-          />
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 + index * 0.05 }}
+          >
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 block">
+              {fieldLabels[f]}
+            </label>
+            <input
+              name={f}
+              placeholder={fieldLabels[f]}
+              value={(form as any)[f]}
+              onChange={handleChange}
+              className="w-full p-3 mb-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800
+                         focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all duration-300 outline-none"
+              required
+            />
+          </motion.div>
         ))}
 
-        <button
-          type="button"
-          onClick={sendEmailOtp}
-          disabled={emailVerified || emailResendTimer > 0}
-          className="w-full mb-4 px-4 py-2 rounded-xl bg-blue-100 hover:bg-blue-200"
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
         >
-          {emailVerified
-            ? "Email Verified ✅"
-            : emailResendTimer > 0
-            ? `Resend in ${emailResendTimer}s`
-            : "Verify Email"}
-        </button>
+          <button
+            type="button"
+            onClick={sendEmailOtp}
+            disabled={emailVerified || emailResendTimer > 0}
+            className={`w-full mb-4 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300 ${
+              emailVerified
+                ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 border-2 border-emerald-300"
+                : "bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 text-blue-700 border border-blue-200"
+            }`}
+          >
+            {emailVerified
+              ? "✅ Email Verified"
+              : emailResendTimer > 0
+              ? `Resend in ${emailResendTimer}s`
+              : "📧 Verify Email"}
+          </button>
+        </motion.div>
 
-        <div className="relative mb-3">
+        <motion.div
+          className="relative mb-3"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.55 }}
+        >
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 block">
+            Password
+          </label>
           <input
             type={showPassword ? "text" : "password"}
             name="password"
-            placeholder="PASSWORD"
+            placeholder="Create a strong password"
             value={form.password}
             onChange={handleChange}
-            className="w-full p-3 border rounded-xl pr-12"
+            className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl pr-12 bg-gray-50 dark:bg-gray-800
+                       focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all duration-300 outline-none"
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-3 text-lg"
+            className="absolute right-3 top-9 text-lg hover:scale-110 transition-transform"
           >
             {showPassword ? "🙈" : "👁️"}
           </button>
-        </div>
+        </motion.div>
 
-        <p className={`text-sm mb-3 ${passwordStrong ? "text-green-600" : "text-orange-500"}`}>
-          {form.password && (passwordStrong ? "Strong password" : "Weak password")}
-        </p>
+        {form.password && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className={`text-sm mb-3 flex items-center gap-1 ${passwordStrong ? "text-emerald-600" : "text-orange-500"}`}
+          >
+            {passwordStrong ? "✅ Strong password" : "⚠️ Weak password"}
+          </motion.p>
+        )}
 
-        <input
-          name="address"
-          value={form.address}
-          onChange={handleChange}
-          placeholder="Delivery Address"
-          className="w-full p-3 mb-3 border rounded-xl"
-        />
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.6 }}
+        >
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 block">
+            Delivery Address
+          </label>
+          <input
+            name="address"
+            value={form.address}
+            onChange={handleChange}
+            placeholder="Enter your delivery address"
+            className="w-full p-3 mb-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800
+                       focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all duration-300 outline-none"
+          />
+        </motion.div>
 
         <FreeLocationPicker
           onSelect={(loc) => {
@@ -289,49 +401,123 @@ export default function Signup({ onLogin }: Props) {
           }}
         />
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl"
+        {serviceOk === false && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-xl mt-2"
+          >
+            ⚠️ Service not available in this location
+          </motion.p>
+        )}
+
+        {serviceOk === true && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-sm text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2 rounded-xl mt-2"
+          >
+            ✅ Service available in your area!
+          </motion.p>
+        )}
+
+        <motion.div
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className="mt-4"
         >
-          {loading ? "Creating account..." : "Sign Up"}
-        </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-primary to-emerald-600 hover:from-primary/90 hover:to-emerald-500
+                       text-white p-3.5 rounded-xl font-semibold shadow-lg shadow-primary/30 hover:shadow-xl transition-all duration-300 ripple-container disabled:opacity-50"
+          >
+            {loading ? "Creating account..." : "Create Account"}
+          </button>
+        </motion.div>
 
         {/* GOOGLE SIGNUP */}
         <div className="mt-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="flex-1 h-px bg-gray-300"></div>
-            <span className="text-gray-500 text-sm">OR</span>
-            <div className="flex-1 h-px bg-gray-300"></div>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
+            <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">or</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
           </div>
 
-          <GoogleLogin
-            onSuccess={(res) => handleGoogleSignup(res.credential)}
-            onError={() => alert("Google login cancelled")}
-          />
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.7 }}
+          >
+            <GoogleLogin
+              onSuccess={(res) => handleGoogleSignup(res.credential)}
+              onError={() => toast.error("Google login cancelled")}
+            />
+          </motion.div>
         </div>
-      </form>
+
+        <motion.p
+          className="text-center mt-5 text-muted-foreground text-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.75 }}
+        >
+          Already have an account?{" "}
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="text-primary font-semibold hover:text-primary/80 transition-colors"
+          >
+            Sign in
+          </button>
+        </motion.p>
+      </motion.form>
 
       {/* EMAIL OTP MODAL */}
       {emailOtpModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-xl w-80 animate-scale-in">
-            <h3 className="font-bold mb-3">Email OTP Verification</h3>
+        <motion.div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          <motion.div
+            className="bg-white dark:bg-card p-8 rounded-3xl w-80 shadow-2xl border border-gray-100 dark:border-gray-800"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 300, damping: 20 }}
+          >
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <span className="text-2xl">📧</span>
+              </div>
+              <h3 className="font-bold text-lg">Email Verification</h3>
+              <p className="text-xs text-muted-foreground mt-1">Enter the OTP sent to your email</p>
+            </div>
             <input
               value={emailOtp}
               onChange={(e) => setEmailOtp(e.target.value)}
               placeholder="Enter OTP"
-              className="w-full p-3 border rounded-xl mb-3"
+              className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl mb-3 text-center text-lg font-mono tracking-widest bg-gray-50 dark:bg-gray-800
+                         focus:ring-2 focus:ring-primary/30 transition-all outline-none"
             />
-            <button
+            <motion.button
               type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={verifyEmailOtp}
-              className="w-full bg-green-500 text-white p-2 rounded-xl"
+              className="w-full bg-gradient-to-r from-primary to-emerald-600 text-white p-3 rounded-xl font-semibold shadow-lg shadow-primary/20"
             >
               Verify Email
+            </motion.button>
+            <button
+              type="button"
+              onClick={() => setEmailOtpModal(false)}
+              className="w-full text-sm text-muted-foreground mt-3 hover:text-foreground transition-colors"
+            >
+              Cancel
             </button>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
     </div>
   );

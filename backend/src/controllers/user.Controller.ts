@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import db from "../db";
 import bcrypt from "bcryptjs";
+import { generateToken } from "../middleware/auth.middleware";
 
 /* =========================
    SIGNUP
-   POST /api/users/signup
+   POST /api/user/signup
 ========================= */
 export const signupUser = async (req: Request, res: Response) => {
   const {
@@ -18,40 +19,45 @@ export const signupUser = async (req: Request, res: Response) => {
     longitude,
   } = req.body;
 
-  /* ✅ BASIC VALIDATION */
+  /* ✅ 1. ENFORCE VALIDATION GUARDS */
   if (!name || !username || !email || !phone || !password) {
     return res.status(400).json({
-      message: "Name, username, email, phone and password are required",
+      success: false,
+      message: "Missing required signup registration fields",
     });
   }
 
   try {
-    /* ✅ CHECK DUPLICATE USERNAME OR EMAIL */
+    /* ✅ 2. CHECK DUPLICATE USERNAME OR EMAIL */
     const checkSql =
       "SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1";
 
     db.query(checkSql, [username, email], async (checkErr: any, rows: any[]) => {
       if (checkErr) {
-        console.error("Duplicate check error:", checkErr);
+        console.error("❌ Duplicate check DB error:", checkErr);
         return res.status(500).json({
-          message: "Database error",
+          success: false,
+          message: "Database error during duplicate check",
         });
       }
 
       if (rows.length > 0) {
         return res.status(409).json({
+          success: false,
           message: "Username or Email already exists",
         });
       }
 
-      /* ✅ HASH PASSWORD */
+      /* ✅ 3. HASH PASSWORD CLEANLY (bcrypt) */
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      /* ✅ INSERT USER */
+      /* ✅ 4. WRITE SECURELY TO LOCAL MYSQL USER SCHEMA PROFILE 🎯
+         Explicitly map all columns including space-literal names and provide safe defaults
+         for role, dark mode, is_private, hide_phone, hide address */
       const insertSql = `
         INSERT INTO users
-        (name, username, email, phone, password, address, latitude, longitude)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (name, username, email, phone, password, address, latitude, longitude, role, \`dark mode\`, is_private, hide_phone, \`hide address\`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 0, 0, 0, 0)
       `;
 
       db.query(
@@ -62,37 +68,55 @@ export const signupUser = async (req: Request, res: Response) => {
           email,
           phone,
           hashedPassword,
-          address || null,
+          address || '',
           latitude || null,
           longitude || null,
         ],
         (err: any, result: any) => {
           if (err) {
-            console.error("Signup DB error:", err);
+            console.error("❌ Critical MySQL signup write crash:", err);
             return res.status(500).json({
-              message: err.sqlMessage || "Database error",
+              success: false,
+              message: "Database failure creating user account",
+              error: err.sqlMessage || err.message,
             });
           }
 
+          const newUserId = result.insertId;
+
+          /* ✅ 5. IMMEDIATELY SIGN A FRESH VALID JWT BEARER TOKEN */
+          const token = generateToken({ id: newUserId, username, role: "CUSTOMER" });
+
+          console.log(`🚀 User successfully registered in local DB! Assigned ID: ${newUserId}`);
+
+          /* ✅ 6. SEND BACK COMPLETE USER RESPONSE OBJECT MATCHING FRONTEND EXPECTATIONS */
           return res.status(201).json({
+            success: true,
             message: "Signup successful",
+            token,
+            role: "CUSTOMER",
+            user_id: newUserId,
             user: {
-              id: result.insertId,
+              id: newUserId,
               name,
               username,
               email,
               phone,
-              address,
-              latitude,
-              longitude,
+              address: address || '',
+              latitude: latitude || null,
+              longitude: longitude || null,
+              role: "CUSTOMER",
             },
           });
         }
       );
     });
-  } catch (error) {
-    console.error("Signup error:", error);
-    return res.status(500).json({ message: "Server error" });
+  } catch (error: any) {
+    console.error("❌ High-level auth registration handler crash:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error during registration sequence",
+    });
   }
 };
 
@@ -110,7 +134,7 @@ export const loginUser = (req: Request, res: Response) => {
   }
 
   const sql = `
-    SELECT id, name, username, email, phone, address, latitude, longitude, password
+    SELECT id, name, username, email, phone, address, latitude, longitude, password, role
     FROM users
     WHERE username = ?
     LIMIT 1
@@ -139,10 +163,19 @@ export const loginUser = (req: Request, res: Response) => {
     }
 
     delete user.password;
+    
+    const role = (user.role || "CUSTOMER").toUpperCase();
 
     return res.json({
+      success: true,
       message: "Login successful",
-      user,
+      token: generateToken({ id: user.id, username: user.username, role }),
+      role,
+      user_id: user.id,
+      user: {
+        ...user,
+        role
+      },
     });
   });
 };

@@ -1,0 +1,575 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getActiveDeliveryOrders = exports.autoAssignNearestPartner = exports.toggleDeliveryOnline = exports.getDeliveryEarnings = exports.updateDeliveryLocation = exports.updatePartnerDeliveryStatus = exports.acceptOrder = exports.getDeliveryOrders = exports.loginDeliveryPartner = exports.signupDeliveryPartner = exports.triggerOrderNotification = void 0;
+const db_1 = __importDefault(require("../db"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const auth_middleware_1 = require("../middleware/auth.middleware");
+/* ======================================================
+   🔔 REUSABLE NOTIFICATION BUILDER HELPER
+   Safely writes alert messages into our verified
+   notifications table schema using backtick-escaped columns.
+====================================================== */
+const triggerOrderNotification = (userId, textMessage) => {
+    const sql = "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)";
+    db_1.default.query(sql, [userId, textMessage], (err) => {
+        if (err)
+            console.error("❌ Failed to log automated background notification row:", err);
+    });
+};
+exports.triggerOrderNotification = triggerOrderNotification;
+/* ======================================================
+   🗂 ENSURE DELIVERY PARTNERS TABLE EXISTS
+====================================================== */
+db_1.default.query(`CREATE TABLE IF NOT EXISTS delivery_partners (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    phone VARCHAR(15) UNIQUE NOT NULL,
+    email VARCHAR(100),
+    password VARCHAR(255) NOT NULL,
+    vehicle_type VARCHAR(50),
+    vehicle_number VARCHAR(20),
+    \`is active\` TINYINT(1) DEFAULT 1,
+    \`is verified\` TINYINT(1) DEFAULT 0,
+    \`created at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    \`document url\` TEXT,
+    \`license number\` VARCHAR(50),
+    aadhaar_number VARCHAR(20),
+    profile_image TEXT,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending'
+  )`, (err) => {
+    if (err)
+        console.error("❌ Could not ensure delivery_partners table:", err);
+});
+/* ======================================================
+   🔐 SIGNUP DELIVERY PARTNER
+   POST /api/delivery/signup
+====================================================== */
+const signupDeliveryPartner = async (req, res) => {
+    const { name, email, phone, password, vehicle_type, vehicle_number, license_number, aadhaar_number } = req.body;
+    if (!name || !email || !phone || !password) {
+        return res.status(400).json({ success: false, message: "Name, email, phone, and password are required" });
+    }
+    const files = req.files;
+    const profile_image = files?.['profile_image']?.[0]?.filename || null;
+    const document_url = files?.['document']?.[0]?.filename || null;
+    try {
+        const checkSql = "SELECT id FROM delivery_partners WHERE email = ? LIMIT 1";
+        db_1.default.query(checkSql, [email], async (checkErr, rows) => {
+            if (checkErr)
+                return res.status(500).json({ success: false, message: "Database error" });
+            if (rows.length > 0)
+                return res.status(409).json({ success: false, message: "Email already exists" });
+            const hashedPassword = await bcryptjs_1.default.hash(password, 10);
+            const sql = `
+        INSERT INTO delivery_partners 
+        (name, phone, email, password, vehicle_type, vehicle_number, \`license number\`, aadhaar_number, profile_image, \`document url\`, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      `;
+            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, aadhaar_number || null, profile_image, document_url], (err, result) => {
+                if (err) {
+                    console.error("❌ Delivery Partner Signup DB Error:", err);
+                    return res.status(500).json({ success: false, message: `Signup failed: ${err.message}` });
+                }
+                return res.status(201).json({ success: true, message: "Delivery partner registered successfully" });
+            });
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+exports.signupDeliveryPartner = signupDeliveryPartner;
+/* ======================================================
+   🔐 LOGIN DELIVERY PARTNER
+   POST /api/delivery/login
+====================================================== */
+const loginDeliveryPartner = (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ success: false, message: "Email and password are required" });
+    }
+    db_1.default.query("SELECT * FROM delivery_partners WHERE email = ? LIMIT 1", [email], async (err, rows) => {
+        if (err)
+            return res.status(500).json({ success: false, message: "Database error" });
+        if (rows.length === 0)
+            return res.status(401).json({ success: false, message: "Invalid credentials" });
+        const partner = rows[0];
+        const isMatch = await bcryptjs_1.default.compare(password, partner.password);
+        if (!isMatch)
+            return res.status(401).json({ success: false, message: "Invalid credentials" });
+        // ✅ Enforce approval status
+        if (partner.status !== "approved") {
+            return res.status(403).json({
+                success: false,
+                message: "Waiting for admin approval",
+                status: partner.status
+            });
+        }
+        const token = (0, auth_middleware_1.generateToken)({ id: partner.id, username: partner.name, role: "DELIVERY" });
+        delete partner.password;
+        return res.json({
+            success: true,
+            message: "Login successful",
+            token,
+            role: "DELIVERY",
+            user_id: partner.id,
+            status: partner.status,
+            data: partner,
+        });
+    });
+};
+exports.loginDeliveryPartner = loginDeliveryPartner;
+/* ======================================================
+   📦 GET PENDING/ACTIONABLE ORDERS FOR DELIVERY PARTNER
+   GET /api/delivery/orders
+====================================================== */
+const getDeliveryOrders = (req, res) => {
+    const partnerId = req.user?.id;
+    let sql = `
+    SELECT 
+      o.id AS orderId,
+      o.\`user id\` AS user_id,
+      u.username,
+      u.phone AS customer_phone,
+      u.address AS customer_address,
+      u.latitude AS customer_lat,
+      u.longitude AS customer_lng,
+      o.\`total amount\` AS total_amount,
+      o.delivery_fee,
+      o.status,
+      o.tracking_status,
+      o.delivery_status,
+      o.\`created at\` AS created_at,
+      o.\`picked at\` AS picked_at,
+      o.out_for_delivery_at,
+      o.\`delivered at\` AS delivered_at,
+
+      oi.id AS item_id,
+      oi.product_name,
+      oi.unit_price,
+      oi.weight,
+      oi.total_price,
+      oi.image
+
+    FROM orders o
+    JOIN users u ON u.id = o.\`user id\`
+    LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+    WHERE o.delivery_status = 'PENDING_PICKUP' OR (o.delivery_partner_id = ? AND o.delivery_status != 'DELIVERED')
+    ORDER BY o.\`created at\` DESC
+  `;
+    db_1.default.query(sql, [partnerId || 0], (err, rows) => {
+        if (err) {
+            console.error("❌ getDeliveryOrders error:", err);
+            return res.status(500).json({
+                success: false,
+                message: "Failed to fetch orders",
+                data: [],
+            });
+        }
+        // Group rows into orders with items
+        const map = new Map();
+        (rows || []).forEach((row) => {
+            if (!map.has(row.orderId)) {
+                const displayTrackingStatus = row.delivery_status === 'PENDING_PICKUP' ? 'CONFIRMED' : (row.delivery_status || row.tracking_status);
+                map.set(row.orderId, {
+                    orderId: row.orderId,
+                    user_id: row.user_id,
+                    username: row.username,
+                    customer_phone: row.customer_phone,
+                    customer_address: row.customer_address,
+                    customer_lat: row.customer_lat,
+                    customer_lng: row.customer_lng,
+                    total_amount: Number(row.total_amount),
+                    delivery_fee: Number(row.delivery_fee),
+                    status: row.status,
+                    tracking_status: displayTrackingStatus,
+                    created_at: row.created_at,
+                    picked_at: row.picked_at,
+                    out_for_delivery_at: row.out_for_delivery_at,
+                    delivered_at: row.delivered_at,
+                    items: [],
+                });
+            }
+            if (row.item_id) {
+                map.get(row.orderId).items.push({
+                    product_name: row.product_name,
+                    unit_price: Number(row.unit_price),
+                    weight: Number(row.weight),
+                    total_price: Number(row.total_price),
+                    image: row.image,
+                });
+            }
+        });
+        return res.json({
+            success: true,
+            data: [...map.values()],
+        });
+    });
+};
+exports.getDeliveryOrders = getDeliveryOrders;
+/* ======================================================
+   📦 ACCEPT ORDER (Delivery Partner)
+   POST /api/delivery/accept/:orderId
+====================================================== */
+const acceptOrder = (req, res) => {
+    const orderId = Number(req.params.orderId);
+    const partnerId = req.user?.id;
+    if (!orderId) {
+        return res.status(400).json({ success: false, message: "Invalid order id" });
+    }
+    // Check current status must be CONFIRMED
+    db_1.default.query("SELECT tracking_status, `user id` FROM orders WHERE id = ? LIMIT 1", [orderId], (err, rows) => {
+        if (err || !rows?.length) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
+        const current = (rows[0].tracking_status || rows[0].delivery_status || "PENDING").toUpperCase();
+        if (current !== "PENDING" && current !== "PENDING_PICKUP" && current !== "CONFIRMED") {
+            return res.status(409).json({
+                success: false,
+                message: `Cannot accept order in ${current} status. Must be PENDING or PENDING_PICKUP.`,
+            });
+        }
+        const sql = `
+        UPDATE orders 
+        SET tracking_status = 'CONFIRMED', status = 'CONFIRMED', delivery_status = 'CONFIRMED',
+            delivery_partner_id = ?
+        WHERE id = ?
+      `;
+        db_1.default.query(sql, [partnerId || null, orderId], (updateErr) => {
+            if (updateErr) {
+                console.error("❌ acceptOrder update error:", updateErr);
+                return res.status(500).json({ success: false, message: "Failed to accept order" });
+            }
+            // Notify customer
+            (0, exports.triggerOrderNotification)(rows[0]["user id"], `🚚 Order #${orderId} accepted by delivery partner`);
+            return res.json({
+                success: true,
+                message: `Order #${orderId} accepted successfully`,
+                data: { orderId, status: "CONFIRMED" },
+            });
+        });
+    });
+};
+exports.acceptOrder = acceptOrder;
+const mailer_1 = require("../utils/mailer");
+/* ======================================================
+   📦 UPDATE PARTNER DELIVERY STATUS
+   PUT /api/delivery/status-update/:orderId
+   Body: { status: "CONFIRMED" | "PICKED" | "OUT_FOR_DELIVERY" | "DELIVERED" }
+====================================================== */
+const updatePartnerDeliveryStatus = (req, res) => {
+    const { orderId } = req.params;
+    const { status } = req.body;
+    const partnerId = req.user?.id; // Logged-in delivery partner ID from verifyToken middleware
+    // 1. FIRST check the current status to prevent duplicate triggers on double-clicks
+    db_1.default.query("SELECT delivery_status FROM `orders` WHERE id = ?", [orderId], (err, rows) => {
+        if (err)
+            return res.status(500).json({ success: false, message: err.message });
+        if (rows.length === 0)
+            return res.status(404).json({ success: false, message: "Order not found" });
+        const currentStatus = (rows[0].delivery_status || "").toUpperCase();
+        if (currentStatus === status.toUpperCase()) {
+            return res.status(400).json({ success: false, message: "Order is already in this status." });
+        }
+        let statusField = "";
+        let timestampColumn = "";
+        let logMessage = "";
+        let assignPartner = false;
+        switch (status.toUpperCase()) {
+            case "CONFIRMED":
+                statusField = "CONFIRMED";
+                assignPartner = true;
+                logMessage = `✅ Your order #${orderId} has been accepted by the delivery partner and is preparing for pickup!`;
+                break;
+            case "PICKED":
+                statusField = "PICKED";
+                timestampColumn = "`picked at` = NOW()";
+                logMessage = `📦 Order #${orderId} has been successfully picked up from the store layout and is processing for transit!`;
+                break;
+            case "OUT_FOR_DELIVERY":
+                statusField = "OUT_FOR_DELIVERY";
+                timestampColumn = "`out_for_delivery_at` = NOW()";
+                logMessage = `🛵 Order #${orderId} status updated: OUT_FOR_DELIVERY is on the way to your doorstep!`;
+                break;
+            case "DELIVERED":
+                statusField = "DELIVERED";
+                timestampColumn = "`delivered at` = NOW(), `status` = 'DELIVERED', `tracking_status` = 'DELIVERED'";
+                logMessage = `🎉 Order #${orderId} has been delivered successfully! Thank you for shopping with VillageMart.`;
+                break;
+            default:
+                return res.status(400).json({ success: false, message: "Invalid status pipeline state string" });
+        }
+        let updateQuery = timestampColumn
+            ? `UPDATE \`orders\` SET \`delivery_status\` = ?, ${timestampColumn} WHERE id = ?`
+            : `UPDATE \`orders\` SET \`delivery_status\` = ? WHERE id = ?`;
+        if (assignPartner) {
+            updateQuery = `UPDATE \`orders\` SET \`delivery_status\` = ?, \`tracking_status\` = 'ACCEPTED', delivery_partner_id = ${partnerId} WHERE id = ?`;
+        }
+        db_1.default.query(updateQuery, [statusField, orderId], (err, result) => {
+            if (err)
+                return res.status(500).json({ success: false, message: err.message });
+            // Instantly fetch user id row to route the automated background notification query 🎯
+            db_1.default.query("SELECT o.`user id`, u.email, u.username FROM `orders` o JOIN `users` u ON o.`user id` = u.id WHERE o.id = ?", [orderId], (uErr, uRes) => {
+                if (!uErr && uRes.length > 0) {
+                    const customerId = uRes[0]['user id'];
+                    const customerEmail = uRes[0].email;
+                    const customerName = uRes[0].username;
+                    const notifySql = "INSERT INTO `notifications` (`user id`, message, `is read`) VALUES (?, ?, 0)";
+                    db_1.default.query(notifySql, [customerId, logMessage], (nErr) => {
+                        if (nErr)
+                            console.error("❌ Notification layer failure:", nErr);
+                    });
+                    // Send email if order is confirmed (accepted by delivery partner)
+                    if (assignPartner && customerEmail) {
+                        const fetchOrderDetailsSql = `
+              SELECT 
+                o.\`total amount\` AS total_amount,
+                o.delivery_fee,
+                oi.id AS item_id,
+                oi.product_name,
+                oi.unit_price,
+                oi.weight,
+                oi.total_price,
+                oi.image,
+                dp.name AS partner_name,
+                dp.phone AS partner_phone
+              FROM orders o
+              LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+              LEFT JOIN delivery_partners dp ON dp.id = ?
+              WHERE o.id = ?
+            `;
+                        db_1.default.query(fetchOrderDetailsSql, [partnerId, orderId], (detailsErr, detailsRows) => {
+                            if (!detailsErr && detailsRows.length > 0) {
+                                const order = detailsRows[0];
+                                const partnerName = order.partner_name || "Assigned Partner";
+                                const partnerPhone = order.partner_phone || "N/A";
+                                const totalAmount = Number(order.total_amount || 0);
+                                const deliveryFee = Number(order.delivery_fee || 0);
+                                const items = detailsRows
+                                    .filter(r => r.item_id)
+                                    .map(r => ({
+                                    product_name: r.product_name,
+                                    unit_price: Number(r.unit_price),
+                                    weight: Number(r.weight),
+                                    total_price: Number(r.total_price),
+                                    image: r.image
+                                }));
+                                (0, mailer_1.sendDeliveryPartnerAssignedMail)(customerEmail, customerName, orderId, totalAmount, deliveryFee, items, partnerName, partnerPhone);
+                            }
+                        });
+                    }
+                }
+            });
+            res.status(200).json({ success: true, message: `Order advanced to state: ${statusField} successfully!` });
+        });
+    });
+};
+exports.updatePartnerDeliveryStatus = updatePartnerDeliveryStatus;
+/* ======================================================
+   📍 UPDATE DELIVERY PARTNER LOCATION
+   POST /api/delivery/location
+   Body: { lat, lng }
+====================================================== */
+const updateDeliveryLocation = (req, res) => {
+    const partnerId = req.user?.id;
+    const { lat, lng } = req.body;
+    if (!partnerId || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+        return res.status(400).json({ success: false, message: "Invalid location data" });
+    }
+    const sql = `
+    INSERT INTO partner_locations (partner_id, partner_type, latitude, longitude)
+    VALUES (?, 'delivery', ?, ?)
+    ON DUPLICATE KEY UPDATE latitude = VALUES(latitude), longitude = VALUES(longitude), updated_at = NOW()
+  `;
+    db_1.default.query(sql, [partnerId, Number(lat), Number(lng)], (err) => {
+        if (err) {
+            console.error("❌ updateDeliveryLocation error:", err);
+            return res.status(500).json({ success: false, message: "Failed to update location" });
+        }
+        return res.json({ success: true, message: "Location updated" });
+    });
+};
+exports.updateDeliveryLocation = updateDeliveryLocation;
+/* ======================================================
+   💰 GET DELIVERY EARNINGS
+   GET /api/delivery/earnings
+====================================================== */
+const getDeliveryEarnings = (req, res) => {
+    const partnerId = req.user?.id;
+    const sql = `
+    SELECT id, \`total amount\` AS total_amount, delivery_fee, tracking_status, \`created at\` AS created_at
+    FROM orders
+    WHERE delivery_partner_id = ? AND tracking_status = 'DELIVERED'
+    ORDER BY \`created at\` DESC
+  `;
+    db_1.default.query(sql, [partnerId], (err, rows) => {
+        if (err) {
+            console.error("❌ getDeliveryEarnings error:", err);
+            return res.status(500).json({ success: false, message: "Failed to fetch earnings", data: [] });
+        }
+        const all = rows || [];
+        // 🚩 BUSINESS LOGIC: 10% Platform Commission
+        // Partner gets 90% of the delivery_fee
+        const COMMISSION_RATE = 0.9;
+        const totalEarnings = all.reduce((s, r) => s + (Number(r.delivery_fee || 20) * COMMISSION_RATE), 0);
+        const totalDeliveries = all.length;
+        const today = new Date().toDateString();
+        const todayOrders = all.filter((r) => new Date(r.created_at).toDateString() === today);
+        const todayEarnings = todayOrders.reduce((s, r) => s + (Number(r.delivery_fee || 20) * COMMISSION_RATE), 0);
+        return res.json({
+            success: true,
+            data: {
+                totalEarnings: Number(totalEarnings.toFixed(2)),
+                totalDeliveries,
+                todayEarnings: Number(todayEarnings.toFixed(2)),
+                todayDeliveries: todayOrders.length,
+                history: all,
+            },
+        });
+    });
+};
+exports.getDeliveryEarnings = getDeliveryEarnings;
+/* ======================================================
+   🟢 TOGGLE ONLINE STATUS
+   POST /api/delivery/toggle-online
+====================================================== */
+const toggleDeliveryOnline = (req, res) => {
+    const partnerId = req.user?.id;
+    const { is_online } = req.body;
+    if (typeof is_online !== 'boolean') {
+        return res.status(400).json({ success: false, message: "is_online (boolean) required" });
+    }
+    db_1.default.query("UPDATE delivery_partners SET `is active` = ? WHERE id = ?", [is_online ? 1 : 0, partnerId], (err) => {
+        if (err)
+            return res.status(500).json({ success: false, message: "Status update failed" });
+        res.json({ success: true, message: `Status updated to ${is_online ? 'online' : 'offline'}` });
+    });
+};
+exports.toggleDeliveryOnline = toggleDeliveryOnline;
+/* ======================================================
+   🤖 AUTO-ASSIGN NEAREST PARTNER
+   Helper function (called during order confirmation)
+====================================================== */
+const autoAssignNearestPartner = (orderId, userLat, userLng) => {
+    const sql = `
+    SELECT 
+      dp.id,
+      (6371 * acos(
+        cos(radians(?)) *
+        cos(radians(pl.latitude)) *
+        cos(radians(pl.longitude) - radians(?)) +
+        sin(radians(?)) *
+        sin(radians(pl.latitude))
+      )) AS distance
+    FROM delivery_partners dp
+    JOIN partner_locations pl ON pl.partner_id = dp.id AND pl.partner_type = 'delivery'
+    WHERE dp.status = 'approved' AND dp.\`is active\` = 1
+    HAVING distance < 10
+    ORDER BY distance ASC
+    LIMIT 1
+  `;
+    db_1.default.query(sql, [userLat, userLng, userLat], (err, rows) => {
+        if (err || !rows?.length) {
+            console.log(`⚠️ No online partners found for Order #${orderId}`);
+            return;
+        }
+        const partnerId = rows[0].id;
+        const updateSql = "UPDATE orders SET delivery_partner_id = ?, tracking_status = 'ACCEPTED' WHERE id = ?";
+        db_1.default.query(updateSql, [partnerId, orderId], (updateErr) => {
+            if (!updateErr) {
+                console.log(`✅ Order #${orderId} auto-assigned to Partner #${partnerId}`);
+                // Notify partner
+                (0, exports.triggerOrderNotification)(partnerId, `🚚 New Order #${orderId} assigned to you!`);
+            }
+        });
+    });
+};
+exports.autoAssignNearestPartner = autoAssignNearestPartner;
+/* ======================================================
+   📍 GET NEARBY GROCERY ORDERS (20 KM RADIUS)
+====================================================== */
+const getActiveDeliveryOrders = (req, res) => {
+    const partnerId = req.user?.id;
+    const courierLat = Number(req.query.lat) && !isNaN(Number(req.query.lat)) ? Number(req.query.lat) : 10.938354;
+    const courierLng = Number(req.query.lng) && !isNaN(Number(req.query.lng)) ? Number(req.query.lng) : 78.418579;
+    // 1. Verify debt metrics directly out of the delivery_partners table ⏱️
+    const checkLockoutSql = `SELECT wallet_balance, commission_due_since FROM delivery_partners WHERE id = ?`;
+    db_1.default.query(checkLockoutSql, [partnerId], (lockErr, partnerResults) => {
+        if (lockErr)
+            return res.status(500).json({ success: false, error: lockErr.message });
+        if (partnerResults.length > 0) {
+            const { wallet_balance, commission_due_since } = partnerResults[0];
+            if (wallet_balance < 0 && commission_due_since) {
+                const hoursElapsed = (new Date().getTime() - new Date(commission_due_since).getTime()) / (1000 * 60 * 60);
+                if (hoursElapsed >= 30) {
+                    return res.status(402).json({
+                        success: false,
+                        isLockedOut: true,
+                        message: "Delivery View Locked: Your 30-hour grace period has expired. Please clear your outstanding commission balance to accept new orders.",
+                        walletBalance: wallet_balance,
+                        hoursElapsed: Math.floor(hoursElapsed)
+                    });
+                }
+            }
+        }
+        // 2. Fetch standard nearby delivery tickets if the account is clear
+        const fetchOrdersSql = `
+      SELECT 
+        o.id, 
+        o.\`user id\`, 
+        o.\`total amount\`, 
+        o.\`delivery_status\`, 
+        o.\`address\`, 
+        o.\`phone\`, 
+        o.\`created at\`,
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'id', oi.id,
+            'product_name', COALESCE(oi.product_name, ''),
+            'unit_price', COALESCE(oi.unit_price, 0.00),
+            'weight', COALESCE(oi.weight, 0.00),
+            'total_price', COALESCE(oi.total_price, 0.00),
+            'image', COALESCE(oi.image, '')
+          )
+        ) AS items,
+        (
+          6371 * acos(
+            cos(radians(?)) * cos(radians(u.latitude)) * cos(radians(u.longitude) - radians(?)) + 
+            sin(radians(?)) * sin(radians(u.latitude))
+          )
+        ) AS distance
+      FROM \`orders\` o
+      JOIN \`users\` u ON o.\`user id\` = u.id
+      LEFT JOIN \`order_items\` oi ON o.id = oi.order_id
+      WHERE o.\`delivery_status\` != 'DELIVERED' 
+        AND o.\`status\` != 'CANCELLED'
+      GROUP BY o.id
+      HAVING distance <= 20
+      ORDER BY o.id DESC
+    `;
+        db_1.default.query(fetchOrdersSql, [courierLat, courierLng, courierLat], (err, results) => {
+            if (err) {
+                console.error("❌ Database query execution crash inside delivery controller:", err.message);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+            const formattedData = results.map((row) => {
+                let parsedItems = [];
+                try {
+                    parsedItems = typeof row.items === "string" ? JSON.parse(row.items) : row.items;
+                }
+                catch (parseError) {
+                    console.error(`⚠️ Failed parsing items for Order #${row.id}:`, parseError);
+                }
+                return {
+                    ...row,
+                    items: parsedItems || []
+                };
+            });
+            return res.status(200).json({ success: true, data: formattedData });
+        });
+    });
+};
+exports.getActiveDeliveryOrders = getActiveDeliveryOrders;

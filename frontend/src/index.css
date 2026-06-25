@@ -1,6 +1,9 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 
 /* =========================================================
    EXISTING GLOBAL COLOR VARIABLES (DO NOT CHANGE)
@@ -12,6 +15,38 @@
   --text-muted: #64748b;
   --accent: #2563eb;
   --border: #e5e7eb;
+
+  /* ---- Sub-App Design System Tokens (Admin/Delivery/Transport) ---- */
+  --color-primary: #16A34A;
+  --color-primary-dark: #15803d;
+  --color-primary-light: #bbf7d0;
+  --color-secondary: #F59E0B;
+  --color-secondary-dark: #d97706;
+  --color-accent: #6366f1;
+  --color-background: #F9FAFB;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #f3f4f6;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border: #E5E7EB;
+  --color-danger: #EF4444;
+  --color-danger-light: #FEE2E2;
+  --color-success: #10B981;
+  --color-success-light: #D1FAE5;
+  --color-warning: #F59E0B;
+  --color-warning-light: #FEF3C7;
+  --color-info: #3B82F6;
+  --color-info-light: #DBEAFE;
+  --font-sans: "Inter", "Poppins", system-ui, -apple-system, sans-serif;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
 }
 
 .dark {
@@ -24,6 +59,7 @@
 }
 
 body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", "Roboto", sans-serif;
   background-color: var(--bg-main);
   color: var(--text-main);
   transition: background 0.3s, color 0.3s;
@@ -35,34 +71,34 @@ body {
 
 @layer base {
   :root {
-    /* ---- Base semantic tokens ---- */
-    --background: 28 100% 99%;
-    --foreground: 155 30% 15%;
+    /* ---- Base semantic tokens (Apple Minimalist Theme) ---- */
+    --background: 0 0% 100%; /* White */
+    --foreground: 0 0% 0%; /* Black */
 
     --card: 0 0% 100%;
-    --card-foreground: 155 30% 15%;
+    --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 155 30% 15%;
+    --popover-foreground: 0 0% 0%;
 
-    --primary: 155 65% 25%;
-    --primary-foreground: 28 100% 99%;
+    --primary: 0 0% 0%; /* Black */
+    --primary-foreground: 0 0% 100%; /* White */
 
-    --secondary: 45 90% 65%;
-    --secondary-foreground: 155 30% 15%;
+    --secondary: 240 5% 96%; /* #F5F5F7 */
+    --secondary-foreground: 0 0% 0%;
 
-    --muted: 45 30% 95%;
-    --muted-foreground: 155 20% 45%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 0 0% 45%;
 
-    --accent-hsl: 45 90% 65%;
-    --accent-foreground: 155 30% 15%;
+    --accent: 240 5% 96%;
+    --accent-foreground: 0 0% 0%;
 
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border-hsl: 45 25% 88%;
-    --input: 45 25% 94%;
-    --ring: 155 65% 25%;
+    --border: 0 0% 90%;
+    --input: 0 0% 92%;
+    --ring: 0 0% 0%;
 
     /* ---- VillageMart Brand ---- */
     --village-green: 155 65% 25%;
@@ -101,33 +137,33 @@ body {
 
   /* ---------------- DARK MODE (DESIGN SYSTEM) ---------------- */
   .dark {
-    --background: 220 35% 7%;
-    --foreground: 210 40% 96%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 98%;
 
-    --card: 220 30% 10%;
-    --card-foreground: 210 40% 96%;
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 220 30% 10%;
-    --popover-foreground: 210 40% 96%;
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 210 40% 96%;
-    --primary-foreground: 220 35% 7%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
 
-    --secondary: 217 25% 18%;
-    --secondary-foreground: 210 40% 96%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 217 25% 18%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
 
-    --accent-hsl: 45 90% 65%;
-    --accent-foreground: 210 40% 96%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62% 35%;
-    --destructive-foreground: 210 40% 96%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border-hsl: 217 25% 18%;
-    --input: 217 25% 18%;
-    --ring: 212 30% 83%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 0 0% 83%;
   }
 }
 
@@ -144,3 +180,615 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* =========================================================
+   PREMIUM UI ENHANCEMENTS
+========================================================= */
+
+/* ---- Skeleton Loader Styles ---- */
+@layer components {
+  .skeleton {
+    @apply bg-gray-200 dark:bg-gray-700 rounded-xl animate-pulse;
+  }
+
+  .skeleton-text {
+    @apply h-4 bg-gray-200 dark:bg-gray-700 rounded-md animate-pulse;
+  }
+
+  .skeleton-circle {
+    @apply rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse;
+  }
+}
+
+/* ---- Ripple Effect ---- */
+.ripple-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+  transform: scale(0);
+  opacity: 0;
+  transition: transform 0.5s ease, opacity 0.3s ease;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.ripple-container:active::after {
+  transform: scale(2.5);
+  opacity: 1;
+  transition: transform 0s, opacity 0s;
+}
+
+/* ---- Glass Card ---- */
+.glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.dark .glass-card {
+  background: rgba(17, 24, 39, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---- Smooth Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(155 20% 75%);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(155 30% 55%);
+}
+
+/* ---- Status Badge Colors ---- */
+.status-delivered {
+  @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400;
+}
+.status-confirmed {
+  @apply bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400;
+}
+.status-pending {
+  @apply bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400;
+}
+.status-cancelled {
+  @apply bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400;
+}
+.status-picked {
+  @apply bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400;
+}
+.status-out_for_delivery {
+  @apply bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400;
+}
+
+/* ---- Premium Button Hover Glow ---- */
+.btn-glow {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-glow::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.15), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.btn-glow:hover::before {
+  opacity: 1;
+}
+
+/* ---- Stagger Utility for lists ---- */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}
+
+.animate-bounce-in {
+  animation: bounceIn 0.5s ease-out forwards;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(0 0% 88%) 25%,
+    hsl(0 0% 95%) 50%,
+    hsl(0 0% 88%) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ---- Mobile Bottom Nav safe area ---- */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .mobile-bottom-nav {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---- Premium transition for all interactive elements ---- */
+button, a, input, select, textarea, [role="button"] {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Image hover zoom container ---- */
+.img-zoom-container {
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.img-zoom-container img {
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.img-zoom-container:hover img {
+  transform: scale(1.08);
+}
+
+/* ---- Floating badge ---- */
+.floating-badge {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* ---- Progress bar animation ---- */
+@keyframes progressFill {
+  from {
+    width: 0%;
+  }
+  to {
+    width: var(--progress-width, 0%);
+  }
+}
+
+.animate-progress {
+  animation: progressFill 1s ease-out forwards;
+}
+
+/* ---- Card hover lift ---- */
+.card-hover-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* =========================================================
+   VEHICLE MARKER (Transport Live Tracking)
+========================================================= */
+.vehicle-marker {
+  background: none !important;
+  border: none !important;
+  transition: transform 0.8s linear;
+}
+
+/* ---- Leaflet Routing Machine — hide instructions panel ---- */
+.leaflet-routing-container {
+  display: none !important;
+}
+
+/* ---- Clean up routing alt lines ---- */
+.leaflet-routing-alt {
+  display: none !important;
+}
+
+/* ---- Map rounded corners fix ---- */
+.leaflet-container {
+  border-radius: inherit;
+}
+
+/* =========================================================
+   HOMEPAGE UI UPGRADE – SCROLLBAR & ANIMATIONS
+========================================================= */
+
+/* ---- Hide scrollbar for horizontal scroll sections ---- */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ---- Pulse glow for flash deal badges ---- */
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+/* ---- Smooth horizontal snap scroll (mobile) ---- */
+.snap-scroll-x {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.snap-scroll-x > * {
+  scroll-snap-align: start;
+}
+
+/* ---- Hero banner shimmer overlay ---- */
+@keyframes heroShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.hero-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 100%
+  );
+  animation: heroShimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---- Category icon bounce on active ---- */
+@keyframes categoryBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.category-bounce {
+  animation: categoryBounce 0.5s ease-out;
+}
+
+/* ---- Gradient text utility ---- */
+.text-gradient-primary {
+  background: linear-gradient(135deg, hsl(155 65% 25%), hsl(155 45% 35%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-warm {
+  background: linear-gradient(135deg, #F59E0B, #EF4444);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* =========================================================
+   PREMIUM GLASSMORPHISM & FLOATING CART
+========================================================= */
+
+/* ---- Glassmorphism card (premium) ---- */
+.glass-card-premium {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+.dark .glass-card-premium {
+  background: rgba(17, 24, 39, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* ---- Glassmorphism card hover ---- */
+.glass-card-premium:hover {
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+.dark .glass-card-premium:hover {
+  background: rgba(17, 24, 39, 0.8);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- Floating cart button safe area ---- */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .floating-cart-safe {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---- Premium section divider ---- */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(155 30% 80%) 50%,
+    transparent 100%
+  );
+  margin: 0 auto;
+  max-width: 80%;
+}
+
+.dark .section-divider {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(155 20% 25%) 50%,
+    transparent 100%
+  );
+}
+
+/* ---- Delivery location bar subtle animation ---- */
+@keyframes locationPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.location-pulse {
+  animation: locationPulse 2s ease-in-out infinite;
+}
+
+/* =========================================================
+   FINAL PRODUCTION POLISH
+========================================================= */
+
+/* ---- Consistent font rendering ---- */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+}
+
+/* ---- Focus ring — accessible & beautiful ---- */
+*:focus-visible {
+  outline: 2px solid hsl(155 65% 25%);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.dark *:focus-visible {
+  outline-color: hsl(155 40% 50%);
+}
+
+/* ---- Selection color ---- */
+::selection {
+  background: hsl(155 65% 25% / 0.2);
+  color: inherit;
+}
+
+/* ---- Smooth page transition backdrop ---- */
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: pageFadeIn 0.35s ease-out;
+}
+
+/* ---- AI chat message slide-in ---- */
+@keyframes chatMsgIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.chat-msg-enter {
+  animation: chatMsgIn 0.25s ease-out;
+}
+
+/* ---- Premium card glow on hover (subtle) ---- */
+.card-glow {
+  transition: box-shadow 0.35s ease, transform 0.35s ease;
+}
+
+.card-glow:hover {
+  box-shadow:
+    0 8px 30px rgba(22, 163, 74, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+.dark .card-glow:hover {
+  box-shadow:
+    0 8px 30px rgba(22, 163, 74, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ---- Mobile tap highlight ---- */
+@media (hover: none) {
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: rgba(22, 163, 74, 0.1);
+  }
+}
+
+/* ---- Toast notification enhancements ---- */
+[role="status"] {
+  font-family: inherit !important;
+}
+
+/* ---- Consistent input styling ---- */
+input, select, textarea {
+  font-size: 16px; /* prevents iOS zoom on focus */
+}
+
+@media (min-width: 640px) {
+  input, select, textarea {
+    font-size: 14px;
+  }
+}
+
+/* ---- Map container premium styling ---- */
+.leaflet-container {
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+}
+
+/* ---- Floating info card for map ---- */
+.map-info-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+.dark .map-info-card {
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---- Voice mic glow animation ---- */
+@keyframes micGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4),
+                0 0 20px rgba(239, 68, 68, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(239, 68, 68, 0),
+                0 0 30px rgba(239, 68, 68, 0.2);
+  }
+}
+
+.mic-glow-active {
+  animation: micGlow 1.5s ease-in-out infinite;
+}
+
+/* ---- Order progress bar shimmer ---- */
+@keyframes progressShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(155 65% 30%) 0%,
+    hsl(155 50% 45%) 50%,
+    hsl(155 65% 30%) 100%
+  );
+  background-size: 200% 100%;
+  animation: progressShimmer 2s linear infinite;
+}
+
+/* ---- Bottom safe area for all fixed elements ---- */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ---- Hide spinners on number inputs ---- */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* =========================================================
+   SUB-APP ANIMATIONS (Admin/Delivery/Transport)
+========================================================= */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s ease-out;
+}
+
+/* ---- Leaflet container z-index fix ---- */
+.leaflet-container { z-index: 1; }
+

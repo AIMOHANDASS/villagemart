@@ -27,6 +27,7 @@ const categories = [
   { value: "Garlands", label: "Garlands" },
   { value: "Dairy", label: "Dairy" },
   { value: "Spices", label: "Spices" },
+  { value: "Village Specials", label: "Village Specials" },
 ];
 
 const AddProductForm: React.FC<Props> = ({ onAdd }) => {

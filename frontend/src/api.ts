@@ -1,92 +1,89 @@
-// frontend/src/api.ts
+import { apiClient } from "./api/apiClient";
 
-// ✅ Base backend URL
-export const API_BASE_URL = "https://villagesmart.in/api";
+export { API_BASE_URL, apiClient } from "./api/apiClient";
 
-/* =========================
-   USER AUTH APIs
-========================= */
+/* ===========================
+   USER SIGNUP
+=========================== */
 
-// Signup
 export const signupUser = async (userData: any) => {
-  const res = await fetch(`${API_BASE_URL}/users/signup`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(userData),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.message || "Signup failed");
-  }
-
-  return data;
+  return apiClient.post("/user/signup", userData);
 };
 
-// Login
+/* ===========================
+   USER LOGIN
+=========================== */
+
 export const loginUser = async (credentials: any) => {
-  const res = await fetch(`${API_BASE_URL}/users/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(credentials),
-  });
+  const data: any = await apiClient.post("/auth/login", credentials);
 
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.message || "Login failed");
+  if (data.token) {
+    localStorage.setItem("jwt_token", data.token);
+    localStorage.setItem("user_role", data.role);
   }
 
   return data;
 };
 
-/* =========================
-   ORDER APIs
-========================= */
+/* ===========================
+   PRODUCTS
+=========================== */
 
-// Create Order
+export const getProducts = async () => {
+  return apiClient.get("/products");
+};
+
+/* ===========================
+   CART
+=========================== */
+
+export const addToCart = async (cartData: {
+  user_id: number;
+  product_id: number;
+  quantity: number;
+}) => {
+  return apiClient.post("/cart", cartData);
+};
+
+/* ===========================
+   CREATE ORDER
+=========================== */
+
 export const createOrder = async (orderData: any) => {
-  const res = await fetch(`${API_BASE_URL}/orders`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(orderData),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.message || "Order creation failed");
-  }
-
-  return data;
+  return apiClient.post("/orders", orderData);
 };
 
-// Admin – Get all orders
-export const getAllOrders = async () => {
-  const res = await fetch(`${API_BASE_URL}/orders`);
+/* ===========================
+   USER ORDERS
+=========================== */
 
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.message || "Failed to fetch orders");
-  }
-
-  return data;
+export const getUserOrders = async (userId: number) => {
+  return apiClient.get(`/orders/user/${userId}`);
 };
 
-/* =========================
-   HELPER
-========================= */
+/* ===========================
+   NOTIFICATIONS
+=========================== */
 
-// Get logged-in user from localStorage
+export const getUserNotifications = async (userId: number) => {
+  return apiClient.get(`/notifications/${userId}`);
+};
+
+/* ===========================
+   STORED USER
+=========================== */
+
 export const getStoredUser = () => {
   const user = localStorage.getItem("user");
   return user ? JSON.parse(user) : null;
+};
+
+/* ===========================
+   LOGOUT
+=========================== */
+
+export const logout = () => {
+  localStorage.removeItem("user");
+  localStorage.removeItem("jwt_token");
+  localStorage.removeItem("user_role");
 };

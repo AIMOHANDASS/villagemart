@@ -9,4 +9,7 @@ const router = express_1.default.Router();
 router.post("/book", transport_controller_1.createTransportBooking);
 router.get("/", transport_controller_1.getAllTransportBookings);
 router.get("/user/:userId", transport_controller_1.getUserTransportBookings);
+router.post("/confirm/:bookingId", transport_controller_1.confirmTransportBooking);
+router.get("/nearby", transport_controller_1.getActiveTransportRides);
+router.post("/start-ride/:id", transport_controller_1.startRideWithOtp);
 exports.default = router;

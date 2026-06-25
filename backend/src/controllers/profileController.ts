@@ -10,7 +10,8 @@ export const getProfile = (req: Request, res: Response) => {
 
   db.query(
     `SELECT id, name, username, email, phone, address,
-            latitude, longitude, profile_image
+            latitude, longitude, profile_image,
+            \`dark mode\` AS dark_mode, is_private, hide_phone, \`hide address\` AS hide_address
      FROM users WHERE id = ?`,
     [id],
     (err, rows: any[]) => {
@@ -99,10 +100,10 @@ export const updateSettings = (req: Request, res: Response) => {
 
   db.query(
     `UPDATE users SET
-      dark_mode=?,
+      \`dark mode\`=?,
       is_private=?,
       hide_phone=?,
-      hide_address=?
+      \`hide address\`=?
      WHERE id=?`,
     [dark_mode, is_private, hide_phone, hide_address, id],
     (err) => {

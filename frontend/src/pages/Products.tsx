@@ -2,23 +2,29 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import toast from "react-hot-toast";
 
 import Header from "@/components/Header";
 import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
-import { ShoppingCart, CheckCircle, Info } from "lucide-react";
+import { ShoppingCart } from "lucide-react";
+import { API_BASE_URL } from "@/api/apiClient";
 
 /* ================= TYPES ================= */
 
 type Product = {
   id: string;
   name: string;
+  T_name?: string;
   price: number;
   image: string;
-  category: "Fruits" | "Vegetables" | "Groceries" | "Garlands" | "Dairy" | "Grains";
+  category: "Fruits" | "Vegetables" | "Groceries" | "Garlands" | "Dairy" | "Grains" | "Village Specials";
+  product_type: "solid" | "liquid";
   rating: number;
   reviews: number;
   inStock: boolean;
+  stock: number;
   isOrganic: boolean;
 };
 
@@ -26,10 +32,50 @@ type Props = {
   user: any;
 };
 
-type Notification = {
-  visible: boolean;
-  productName: string;
-  action: "added" | "exists";
+/* ================= SKELETON LOADER ================= */
+
+const ProductSkeleton = () => (
+  <div className="rounded-2xl overflow-hidden bg-card shadow-md border-0">
+    <div className="w-full h-48 skeleton animate-shimmer" />
+    <div className="p-4 space-y-3">
+      <div className="skeleton-text w-16 h-3" />
+      <div className="skeleton-text w-full h-4" />
+      <div className="skeleton-text w-24 h-3" />
+      <div className="flex justify-between items-center mt-3">
+        <div className="skeleton-text w-16 h-6" />
+        <div className="skeleton w-20 h-8" />
+      </div>
+    </div>
+  </div>
+);
+
+const SkeletonGrid = () => (
+  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+    {Array.from({ length: 10 }).map((_, i) => (
+      <ProductSkeleton key={i} />
+    ))}
+  </div>
+);
+
+/* ================= PAGE ANIMATION ================= */
+
+const pageVariants = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -10 },
+};
+
+const staggerContainer = {
+  animate: {
+    transition: {
+      staggerChildren: 0.05,
+    },
+  },
+};
+
+const cardVariant = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0 },
 };
 
 /* ================= COMPONENT ================= */
@@ -43,12 +89,7 @@ const Products: React.FC<Props> = ({ user }) => {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-
-  const [notification, setNotification] = useState<Notification>({
-    visible: false,
-    productName: "",
-    action: "added",
-  });
+  const [isLoading, setIsLoading] = useState(true);
 
   /* ================= CATEGORIES ================= */
 
@@ -60,6 +101,7 @@ const Products: React.FC<Props> = ({ user }) => {
     { value: "Fruits", label: "🍎 Fruits" },
     { value: "Grains", label: "🌾 Grains" },
     { value: "Garlands", label: "🌸 Garlands" },
+    { value: "Village Specials", label: "🌴 Village Specials" },
   ];
 
   /* ================= HANDLE URL PARAMS ================= */
@@ -73,35 +115,36 @@ const Products: React.FC<Props> = ({ user }) => {
 
   useEffect(() => {
     const fetchProducts = async () => {
+      setIsLoading(true);
       try {
-        const res = await fetch("/datadetails1.csv");
-        if (!res.ok) throw new Error("Failed to load products file.");
+        // 🎯 Enforce zero CSV file fallback. Direct MySQL API streaming only.
+        const res = await fetch(`${API_BASE_URL}/products`);
+        if (!res.ok) throw new Error("Failed to load products from database.");
 
-        const csvText = await res.text();
-        const rows = csvText.split("\n").slice(1);
+        const json = await res.json();
+        const rows = json.data || json || [];
 
-        const parsedProducts: Product[] = rows
-          .map((row) => {
-            const cols = row.split(",");
-            if (cols.length < 9) return null;
-
-            return {
-              id: cols[0]?.replace(/"/g, ""),
-              name: cols[1]?.replace(/"/g, ""),
-              price: parseFloat(cols[2]),
-              image: cols[3]?.replace(/"/g, ""),
-              category: cols[4] as Product["category"],
-              rating: parseFloat(cols[5]),
-              reviews: parseInt(cols[6]),
-              inStock: cols[7]?.toLowerCase() === "true",
-              isOrganic: cols[8]?.toLowerCase() === "true",
-            };
-          })
-          .filter((item): item is Product => item !== null);
+        const parsedProducts: Product[] = rows.map((row: any) => ({
+          id: String(row.id),
+          name: row.E_name || "",
+          T_name: row.T_name || "",
+          price: Number(row.s_price) || 0,
+          image: row.imageurl || "",
+          category: row.category as Product["category"],
+          product_type: row.product_type || "solid",
+          rating: 4.5,
+          reviews: 0,
+          inStock: Number(row.inStock) > 0,
+          stock: Number(row.inStock) || 0,
+          isOrganic: !!row.isOrganic,
+        }));
 
         setProducts(parsedProducts);
       } catch (err) {
         console.error("Error fetching products:", err);
+        toast.error("Failed to load products");
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -148,102 +191,73 @@ const Products: React.FC<Props> = ({ user }) => {
 
   /* ================= CART LOGIC (GARLAND DELIVERY DATE) ================= */
 
-  const showNotification = (productName: string, action: "added" | "exists") => {
-    setNotification({ visible: true, productName, action });
-    setTimeout(() => {
-      setNotification((prev) => ({ ...prev, visible: false }));
-    }, 2500);
-  };
+  const addToCart = (product: Product, deliveryDate?: string, size?: string, quantity?: number, unitPrice?: number) => {
+    const cart = JSON.parse(localStorage.getItem("cart") || "[]");
+    const existingIndex = cart.findIndex((item: any) => item.id === product.id);
 
-  const addToCart = (product: Product, deliveryDate?: string) => {
-    const rawCart = localStorage.getItem("cart");
-    let cart: any[] = rawCart ? JSON.parse(rawCart) : [];
+    const newQty = quantity ?? 1;
+    const newUnit = size || "1 qty";
 
-    const existing = cart.find((item: any) => item.id === product.id);
-
-    let initialUnit = "unit";
-    if (product.category === "Groceries") initialUnit = "kg";
-    else if (product.category === "Fruits" || product.category === "Vegetables")
-      initialUnit = "kg";
-    else if (product.category === "Garlands") initialUnit = "unit";
-
-    const initialQuantity = initialUnit === "kg" ? 0.5 : 1;
-
-    let action: "added" | "exists";
-
-    if (existing) {
-      action = "exists";
+    if (newQty === 0) {
+      if (existingIndex >= 0) {
+        cart.splice(existingIndex, 1);
+        toast.success(`${product.name} removed from cart`);
+      }
     } else {
-      cart.push({
-        ...product,
-        quantity: initialQuantity,
-        unit: initialUnit,
-        deliveryDate:
-          product.category === "Garlands" ? deliveryDate || null : null,
-      });
-
-      localStorage.setItem("cart", JSON.stringify(cart));
-      window.dispatchEvent(new Event("storage"));
-      action = "added";
+      if (existingIndex >= 0) {
+        cart[existingIndex].quantity = newQty;
+        cart[existingIndex].selectedSize = newUnit;
+        if (unitPrice !== undefined) cart[existingIndex].calculatedUnitPrice = unitPrice;
+      } else {
+        cart.push({
+          ...product,
+          quantity: newQty,
+          selectedSize: newUnit,
+          calculatedUnitPrice: unitPrice !== undefined ? unitPrice : product.price,
+          deliveryDate: product.category === "Garlands" ? deliveryDate || null : null,
+        });
+      }
+      toast.success(`${product.name} added to cart!`);
     }
 
-    showNotification(product.name, action);
-  };
-
-  /* ================= POPUP ================= */
-
-  const NotificationPopup = () => {
-    if (!notification.visible) return null;
-
-    const isExists = notification.action === "exists";
-
-    return (
-      <div
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 
-        bg-white p-6 rounded-xl shadow-2xl border-2 z-50 max-w-xs w-full text-center animate-in fade-in zoom-in"
-        style={{ borderColor: isExists ? "#f59e0b" : "#10b981" }}
-      >
-        {isExists ? (
-          <Info className="h-8 w-8 text-yellow-600 mx-auto mb-3" />
-        ) : (
-          <CheckCircle className="h-8 w-8 text-green-600 mx-auto mb-3" />
-        )}
-
-        <h3 className="text-lg font-bold mb-1">
-          {isExists ? "Item Already in Cart!" : "Added to Cart!"}
-        </h3>
-
-        <p className="text-sm text-gray-600">
-          <span className="font-semibold">{notification.productName}</span>{" "}
-          {isExists ? " is already in your cart." : " is ready for checkout."}
-        </p>
-
-        <Button size="sm" className="mt-4" onClick={() => navigate("/cart")}>
-          <ShoppingCart className="h-4 w-4 mr-2" />
-          View Cart
-        </Button>
-      </div>
-    );
+    localStorage.setItem("cart", JSON.stringify(cart));
+    window.dispatchEvent(new Event("storage"));
   };
 
   /* ================= UI ================= */
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <motion.div
+      className="min-h-screen bg-gray-50 dark:bg-background"
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      transition={{ duration: 0.4 }}
+    >
       <Header user={user} />
-      <NotificationPopup />
 
       {/* CATEGORY BUTTONS */}
-      <section className="bg-white border-b py-4 sticky top-0 z-20">
+      <section className="bg-white/80 dark:bg-card/80 backdrop-blur-md border-b py-4 sticky top-[64px] z-20">
         <div className="container px-4 flex flex-wrap gap-3 justify-center">
           {categories.map((cat) => (
-            <Button
+            <motion.div
               key={cat.value}
-              variant={selectedCategory === cat.value ? "default" : "outline"}
-              onClick={() => navigate(`/products?category=${cat.value}`)}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
-              {cat.label}
-            </Button>
+              <Button
+                variant={selectedCategory === cat.value ? "default" : "outline"}
+                className={`rounded-full px-5 shadow-sm transition-all duration-300 ${
+                  selectedCategory === cat.value
+                    ? "shadow-md shadow-primary/30"
+                    : "hover:shadow-md"
+                }`}
+                onClick={() => navigate(`/products?category=${cat.value}`)}
+              >
+                {cat.label}
+              </Button>
+            </motion.div>
           ))}
         </div>
       </section>
@@ -251,26 +265,48 @@ const Products: React.FC<Props> = ({ user }) => {
       {/* PRODUCTS GRID */}
       <section className="py-12">
         <div className="container px-4">
-          {filteredProducts.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-              {filteredProducts.map((product) => (
-                <ProductCard
+          {isLoading ? (
+            <SkeletonGrid />
+          ) : filteredProducts.length > 0 ? (
+            <motion.div
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6"
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+            >
+              {filteredProducts.map((product, index) => (
+                <motion.div
                   key={product.id}
-                  {...product}
-                  onAddToCart={(deliveryDate) =>
-                    addToCart(product, deliveryDate)
-                  }
-                />
+                  variants={cardVariant}
+                  transition={{ duration: 0.3, delay: index * 0.03 }}
+                >
+                  <ProductCard
+                    {...product}
+                    onAddToCart={(deliveryDate, size, quantity, unitPrice) =>
+                      addToCart(product, deliveryDate, size, quantity, unitPrice)
+                    }
+                  />
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           ) : (
-            <p className="text-center text-xl text-gray-600 py-16">
-              No products found.
-            </p>
+            <motion.div
+              className="text-center py-16"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+            >
+              <div className="text-6xl mb-4">🔍</div>
+              <p className="text-xl text-gray-600 dark:text-gray-400 font-medium">
+                No products found.
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Try a different category or search term.
+              </p>
+            </motion.div>
           )}
         </div>
       </section>
-    </div>
+    </motion.div>
   );
 };
 
