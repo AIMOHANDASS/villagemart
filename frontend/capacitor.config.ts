@@ -2,8 +2,9 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.villagemart.app',
-  appName: 'VillageMart Delivery partner',
-  webDir: 'dist/delivery'
+  appName: 'VillageMart Transport Partner',
+  webDir: 'dist/transport'
 };
 
 export default config;
+
