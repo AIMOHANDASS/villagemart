@@ -110,6 +110,7 @@ const mapOrders = (rows) => {
                 total_amount: Number(row.total_amount),
                 delivery_fee: Number(row.delivery_fee),
                 status: row.status,
+                payment_method: row.payment_method || "cod",
                 tracking_status: row.tracking_status,
                 delivery_status: row.delivery_status,
                 cancel_reason: row.cancel_reason,
@@ -143,6 +144,7 @@ const orderQuery = `
     o.\`total amount\` AS total_amount,
     o.delivery_fee,
     o.status,
+    o.payment_method,
     COALESCE(o.delivery_status, o.tracking_status) AS tracking_status,
     o.delivery_status,
     o.delivery_partner_id,
@@ -203,8 +205,8 @@ const getAdminPanelData = async (req, res) => {
       SELECT
         tb.id,
         tb.\`user id\` AS user_id,
-        tb.customer_name,
-        tb.customer_phone,
+        COALESCE(u.name, tb.customer_name) AS customer_name,
+        COALESCE(u.phone, tb.customer_phone) AS customer_phone,
         tb.from_address,
         tb.\`from lat\` AS from_lat,
         tb.from_Ing AS from_lng,
@@ -213,14 +215,15 @@ const getAdminPanelData = async (req, res) => {
         tb.\`to Ing\` AS to_lng,
         tb.\`distance km\` AS distance_km,
         tb.charge_amount,
+        tb.vehicle_type,
         tb.status,
         tb.notes,
         tb.\`created at\` AS created_at,
         u.username,
         u.email
       FROM transport_bookings tb
-      JOIN users u ON u.id = tb.\`user id\`
-      ORDER BY tb.\`created at\` DESC
+      LEFT JOIN users u ON u.id = tb.\`user id\`
+      ORDER BY tb.id DESC
     `;
         const partyHallSql = `
       SELECT
@@ -276,10 +279,32 @@ exports.getAdminPanelData = getAdminPanelData;
 /* ======================================================
    🛒 CREATE ORDER
 ====================================================== */
-const createOrder = (req, res) => {
+const createOrder = async (req, res) => {
     const { userId, items, address, phone, paymentMethod } = req.body;
     if (!userId || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ message: "❌ Invalid order data" });
+    }
+    try {
+        // 🚀 ATOMIC VALIDATION LOOP: Cross-references product tables before completing requests
+        for (const item of items) {
+            const [productRows] = await db_1.default.promise().query("SELECT id, E_name, inStock FROM products WHERE id = ?", [item.product_id || item.id]);
+            if (!productRows || productRows.length === 0) {
+                return res.status(404).json({ success: false, message: "Product missing." });
+            }
+            const availableStock = Number(productRows[0].inStock || 0);
+            const requestedQuantity = Number(item.quantity || item.qty || item.weight || 1);
+            // 🎯 STRICT BACKEND GATE: Rejects over-ordered pipelines instantly
+            if (requestedQuantity > availableStock) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Order Failed! Item '${productRows[0].E_name}' only has ${availableStock} units left, but you requested ${requestedQuantity}. Please adjust your cart.`
+                });
+            }
+        }
+    }
+    catch (validationErr) {
+        console.error("❌ Stock validation error:", validationErr);
+        return res.status(500).json({ success: false, message: "Failed to validate order stock." });
     }
     const garlandItems = items.filter((item) => isGarlandItem(item));
     for (const garlandItem of garlandItems) {

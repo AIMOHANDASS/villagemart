@@ -3,8 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getStats = exports.rejectPartner = exports.approvePartner = exports.getTransportPartners = exports.getDeliveryPartners = exports.adminLogin = void 0;
+exports.handleAdminForceReload = exports.handleAdminBlockPartner = exports.handleAdminUnblockPartner = exports.getStats = exports.rejectPartner = exports.approvePartner = exports.getUsers = exports.getTransportPartners = exports.getDeliveryPartners = exports.adminLogin = void 0;
 const db_1 = __importDefault(require("../db"));
+const server_1 = require("../server");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const adminLogin = async (req, res) => {
     const { username, password } = req.body;
@@ -33,7 +34,7 @@ exports.adminLogin = adminLogin;
    👥 PARTNER MANAGEMENT
 ====================================================== */
 const getDeliveryPartners = (req, res) => {
-    const sql = "SELECT id, name, email, phone, vehicle_type, vehicle_number, status, `created at` AS created_at, profile_image, `document url` AS document_url FROM delivery_partners ORDER BY `created at` DESC";
+    const sql = "SELECT id, name, email, phone, vehicle_type, vehicle_number, status, account_status, `created at` AS created_at, profile_image, dl_document_url, rc_document_url, aadhaar_document_url FROM delivery_partners ORDER BY `created at` DESC";
     db_1.default.query(sql, (err, rows) => {
         if (err)
             return res.status(500).json({ success: false, message: "Database error" });
@@ -42,7 +43,7 @@ const getDeliveryPartners = (req, res) => {
 };
 exports.getDeliveryPartners = getDeliveryPartners;
 const getTransportPartners = (req, res) => {
-    const sql = "SELECT id, name, email, phone, vehicle_type, vehicle_number, status, `created at` AS created_at, profile_image, `document url` AS document_url FROM transport_partners ORDER BY `created at` DESC";
+    const sql = "SELECT id, name, email, phone, vehicle_type, vehicle_number, status, account_status, `created at` AS created_at, profile_image, dl_document_url, rc_document_url, aadhaar_document_url FROM transport_partners ORDER BY `created at` DESC";
     db_1.default.query(sql, (err, rows) => {
         if (err)
             return res.status(500).json({ success: false, message: "Database error" });
@@ -50,6 +51,24 @@ const getTransportPartners = (req, res) => {
     });
 };
 exports.getTransportPartners = getTransportPartners;
+const getUsers = (req, res) => {
+    const sql = "SELECT id, name, username, email, phone, profile_image, `created at` AS created_at, 1 AS is_verified FROM users ORDER BY `created at` DESC";
+    db_1.default.query(sql, (err, rows) => {
+        if (err) {
+            console.error("❌ Error fetching users:", err);
+            // Fallback query in case username doesn't exist
+            const fallbackSql = "SELECT id, name, email, phone, `created at` AS created_at, 1 AS is_verified FROM users ORDER BY `created at` DESC";
+            db_1.default.query(fallbackSql, (err2, rows2) => {
+                if (err2)
+                    return res.status(500).json({ success: false, message: "Database error fetching users" });
+                return res.json({ success: true, data: rows2 });
+            });
+            return;
+        }
+        res.json({ success: true, data: rows });
+    });
+};
+exports.getUsers = getUsers;
 const approvePartner = (type) => async (req, res) => {
     const id = req.params.id;
     const table = type === "delivery" ? "delivery_partners" : "transport_partners";
@@ -103,3 +122,63 @@ const getStats = (req, res) => {
     });
 };
 exports.getStats = getStats;
+/* ======================================================
+   🔓 UNBLOCK PARTNER (Admin override)
+====================================================== */
+const handleAdminUnblockPartner = async (req, res) => {
+    const { partnerId, partnerRole } = req.body;
+    if (!partnerId || !partnerRole) {
+        return res.status(400).json({ success: false, message: "Missing partnerId or partnerRole." });
+    }
+    const targetTable = String(partnerRole).toLowerCase() === "transport" ? "transport_partners" : "delivery_partners";
+    // 🎯 ADMIN RESET OVERRIDE: Unblocks accounts, zeroes the owed balance, and clears timer records
+    const unblockSql = `
+    UPDATE ${targetTable} 
+    SET account_status = 'APPROVED', 
+        pending_commission = 0.00, 
+        commission_deadline = NULL 
+    WHERE id = ?
+  `;
+    db_1.default.query(unblockSql, [partnerId], (err, result) => {
+        if (err)
+            return res.status(500).json({ success: false, error: err.message });
+        return res.status(200).json({
+            success: true,
+            message: `🎉 Partner #${partnerId} successfully unblocked! Service access has been completely restored.`
+        });
+    });
+};
+exports.handleAdminUnblockPartner = handleAdminUnblockPartner;
+/* ======================================================
+   🚫 BLOCK PARTNER (Admin override)
+====================================================== */
+const handleAdminBlockPartner = async (req, res) => {
+    const { partnerId, partnerRole } = req.body;
+    if (!partnerId || !partnerRole) {
+        return res.status(400).json({ success: false, message: "Missing partnerId or partnerRole." });
+    }
+    const targetTable = String(partnerRole).toLowerCase() === "transport" ? "transport_partners" : "delivery_partners";
+    const blockSql = `
+    UPDATE ${targetTable} 
+    SET account_status = 'BLOCKED'
+    WHERE id = ?
+  `;
+    db_1.default.query(blockSql, [partnerId], (err, result) => {
+        if (err)
+            return res.status(500).json({ success: false, error: err.message });
+        return res.status(200).json({
+            success: true,
+            message: `🚫 Partner #${partnerId} has been manually blocked.`
+        });
+    });
+};
+exports.handleAdminBlockPartner = handleAdminBlockPartner;
+/* ======================================================
+   🔄 FORCE GLOBAL RELOAD
+====================================================== */
+const handleAdminForceReload = (req, res) => {
+    // Broadcast an instruction to every connected Socket.IO client globally
+    server_1.io.emit("system_reload");
+    return res.status(200).json({ success: true, message: "🚀 Broadcast sent: All client applications are now reloading." });
+};
+exports.handleAdminForceReload = handleAdminForceReload;

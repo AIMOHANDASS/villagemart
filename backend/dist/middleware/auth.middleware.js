@@ -3,8 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAdminOrTransport = exports.isAdminOrDelivery = exports.isCustomer = exports.isTransport = exports.isDelivery = exports.isAdmin = exports.requireRole = exports.checkRequiredRoles = exports.verifyToken = exports.generateToken = void 0;
+exports.checkPartnerSessionStatus = exports.isAdminOrTransport = exports.isAdminOrDelivery = exports.isCustomer = exports.isTransport = exports.isDelivery = exports.isAdmin = exports.requireRole = exports.checkRequiredRoles = exports.verifyToken = exports.generateToken = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const db_1 = __importDefault(require("../db"));
 const JWT_SECRET = process.env.JWT_SECRET || "VILLAGEMART_SUPER_SECURE_PERMANENT_LOCAL_SECRET_KEY_2026";
 /* ======================================================
    🔐 GENERATE JWT TOKEN
@@ -31,7 +32,8 @@ const verifyToken = (req, res, next) => {
         }
         // Mount the authenticated parameters securely onto the Express request channel
         req.user = { id: decoded.id, role: String(decoded.role).toUpperCase() };
-        next();
+        // 🛡️ DYNAMIC BLOCK CHECK: Automatically terminate session if the partner was blocked
+        (0, exports.checkPartnerSessionStatus)(req, res, next);
     });
 };
 exports.verifyToken = verifyToken;
@@ -87,3 +89,33 @@ exports.isTransport = (0, exports.checkRequiredRoles)(["TRANSPORT", "RIDER", "DR
 exports.isCustomer = (0, exports.checkRequiredRoles)(["CUSTOMER"]);
 exports.isAdminOrDelivery = (0, exports.checkRequiredRoles)(["ADMIN", "DELIVERY", "DRIVER"]);
 exports.isAdminOrTransport = (0, exports.checkRequiredRoles)(["ADMIN", "TRANSPORT", "RIDER", "DRIVER"]);
+/* ======================================================
+   🔐 PARTNER COMMISSION GUARD SESSION VALIDATOR
+   Checks if the active logged-in partner's account_status
+   has been set to 'BLOCKED' by the cron engine.
+====================================================== */
+const checkPartnerSessionStatus = async (req, res, next) => {
+    const partnerId = req.user?.id;
+    const role = req.user?.role; // 'TRANSPORT' or 'DELIVERY'
+    if (!partnerId || !role)
+        return next(); // Skip if not a valid user payload
+    const roleUpper = role.toUpperCase();
+    let table = null;
+    if (roleUpper === 'TRANSPORT' || roleUpper === 'RIDER')
+        table = 'transport_partners';
+    else if (roleUpper === 'DELIVERY')
+        table = 'delivery_partners';
+    if (!table)
+        return next(); // Not a partner role, skip
+    db_1.default.query(`SELECT account_status FROM ${table} WHERE id = ?`, [partnerId], (err, rows) => {
+        if (err || rows.length === 0 || rows[0].account_status === 'BLOCKED') {
+            return res.status(403).json({
+                success: false,
+                isBlocked: true,
+                message: "Session Terminated: Account blocked due to outstanding commissions."
+            });
+        }
+        next();
+    });
+};
+exports.checkPartnerSessionStatus = checkPartnerSessionStatus;

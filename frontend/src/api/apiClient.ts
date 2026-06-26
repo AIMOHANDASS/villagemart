@@ -10,39 +10,35 @@ export const API_BASE_URL = BASE_URL;
 
 const getAppTokenKey = (): string => {
   const hostname = window.location.hostname.toLowerCase();
-  const pathname = window.location.pathname.toLowerCase();
   const appMode = import.meta.env.VITE_APP_MODE;
 
-  // 1. Check build environment definitions
+  // 1. Check strict build environment definitions (Takes highest priority in Production)
   if (appMode === "admin") return "jwt_token_admin";
   if (appMode === "delivery") return "jwt_token_delivery";
   if (appMode === "transport") return "jwt_token_transport";
+  if (appMode === "consumer") return "jwt_token";
 
-  // 2. URL Search Parameter Override (?app=transport or ?app=transport/earnings)
+  // 2. URL Search Parameter Override (For localhost dynamic switching)
   if (typeof window !== 'undefined') {
     const searchParams = new URLSearchParams(window.location.search);
-    const queryMode = (searchParams.get('app') || "").split("/")[0]; // ✅ FIXED: Extract base app mode before any subpath
+    const queryMode = (searchParams.get('app') || "").split("/")[0];
     if (queryMode === "admin") return "jwt_token_admin";
     if (queryMode === "delivery") return "jwt_token_delivery";
     if (queryMode === "transport") return "jwt_token_transport";
   }
 
   // 3. Strict Hostname / Domain evaluations
-  if (hostname.startsWith("admin.") || hostname.includes("villagemart-admin") || hostname.includes("-admin") || hostname.includes("admin")) {
+  if (hostname.startsWith("admin.") || hostname.includes("-admin") || hostname.includes("admin")) {
     return "jwt_token_admin";
   }
-  if (hostname.startsWith("delivery.") || hostname.includes("villagemart-delivery") || hostname.includes("-delivery") || hostname.includes("delivery")) {
+  if (hostname.startsWith("delivery.") || hostname.includes("-delivery") || hostname.includes("delivery")) {
     return "jwt_token_delivery";
   }
-  if (hostname.startsWith("transport.") || hostname.includes("villagemart-transport") || hostname.includes("-transport") || hostname.includes("transport")) {
+  if (hostname.startsWith("transport.") || hostname.includes("-transport") || hostname.includes("transport")) {
     return "jwt_token_transport";
   }
 
-  // 4. Subfolder deep path routing fallbacks
-  if (pathname.includes("admin")) return "jwt_token_admin";
-  if (pathname.includes("delivery")) return "jwt_token_delivery";
-  if (pathname.includes("transport")) return "jwt_token_transport";
-
+  // 4. Default to standard consumer token
   return "jwt_token";
 };
 
@@ -178,7 +174,8 @@ apiClient.interceptors.response.use(
             toast.error("Session expired. Logging out...");
             const adminKeys = ["jwt_token_admin", "admin_user", "admin_token", "user_role_admin"];
             adminKeys.forEach((key) => localStorage.removeItem(key));
-            window.location.href = "/?app=admin/login";
+            const isSubdomain = window.location.hostname.toLowerCase().startsWith("admin.");
+            window.location.href = isSubdomain ? "/login" : "/?app=admin/login";
           }
         } else {
           // Display distinct error alert banner
@@ -200,7 +197,8 @@ apiClient.interceptors.response.use(
       if (!currentToken) {
         if (!isOnLoginPage) {
           toast.error("No active session found. Please log in.");
-          const loginUrl = appContext === "consumer" ? "/login" : `/?app=${appContext}/login`;
+          const isSubdomain = window.location.hostname.toLowerCase().startsWith(`${appContext}.`);
+          const loginUrl = (isSubdomain || appContext === "consumer") ? "/login" : `/?app=${appContext}/login`;
           window.location.href = loginUrl;
         }
         return Promise.reject(new Error(serverMessage));
@@ -222,7 +220,8 @@ apiClient.interceptors.response.use(
           const keysToClear = appKeyMap[appContext] || appKeyMap.consumer;
           keysToClear.forEach((key) => localStorage.removeItem(key));
 
-          const loginUrl = appContext === "consumer" ? "/login" : `/?app=${appContext}/login`;
+          const isSubdomain = window.location.hostname.toLowerCase().startsWith(`${appContext}.`);
+          const loginUrl = (isSubdomain || appContext === "consumer") ? "/login" : `/?app=${appContext}/login`;
           window.location.href = loginUrl;
         }
         return Promise.reject(new Error(serverMessage));

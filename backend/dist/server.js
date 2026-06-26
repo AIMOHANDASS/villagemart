@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.io = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
-dotenv_1.default.config();
+dotenv_1.default.config({ override: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const path_1 = __importDefault(require("path"));
@@ -24,6 +24,7 @@ const transport_routes_1 = __importDefault(require("./routes/transport.routes"))
 const partyHall_routes_1 = __importDefault(require("./routes/partyHall.routes"));
 const location_routes_1 = __importDefault(require("./routes/location.routes"));
 const review_routes_1 = __importDefault(require("./routes/review.routes"));
+const address_routes_1 = __importDefault(require("./routes/address.routes"));
 // API Role Routes
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const payment_routes_1 = __importDefault(require("./routes/payment.routes"));
@@ -31,9 +32,11 @@ const delivery_routes_1 = __importDefault(require("./routes/delivery.routes"));
 const transportDriver_routes_1 = __importDefault(require("./routes/transportDriver.routes"));
 const admin_routes_1 = __importDefault(require("./routes/admin.routes"));
 const product_routes_1 = __importDefault(require("./routes/product.routes"));
+const settings_routes_1 = __importDefault(require("./routes/settings.routes"));
 // Initialize Tables
 require("./controllers/location.controller");
 require("./db-upgrade");
+require("./cron/commissionGuard");
 const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 // ============================
@@ -48,29 +51,11 @@ exports.io = new socket_io_1.Server(httpServer, {
 // ============================
 // Middleware
 // ============================
-const allowedOrigins = [
-    "https://villagesmart.in",
-    "https://transport.villagesmart.in",
-    "https://delivery.villagesmart.in",
-    "https://villagemart-transport.web.app",
-    "https://villagemart-delivery.web.app"
-];
 app.use((0, cors_1.default)({
-    origin: function (origin, callback) {
-        // Allow server-to-server or local testing tools with no origin defined
-        if (!origin)
-            return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith(".web.app")) {
-            callback(null, true);
-        }
-        else {
-            console.warn(`🛑 CORS Policy Blocked traffic from domain origin: ${origin}`);
-            callback(new Error("Not allowed by CORS security framework policy"));
-        }
-    },
+    origin: true, // true reflects the requesting origin, allowing credentials
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"]
 }));
 app.use(express_1.default.json());
 // ✅ Serve uploaded partner documents (images, PDFs, etc.)
@@ -115,6 +100,7 @@ app.use("/api/user", user_routes_1.default);
 app.use("/api/orders", order_routes_1.default);
 app.use("/api/notifications", notification_routes_1.default);
 app.use("/api/email", emailOtp_routes_1.default);
+app.use("/api/addresses", address_routes_1.default);
 app.use("/api/auth", forgotPassword_routes_1.default);
 app.use("/api/auth", googleAuth_routes_1.default);
 app.use("/api/auth", auth_routes_1.default);
@@ -128,6 +114,7 @@ app.use("/api/admin", admin_routes_1.default);
 app.use("/api/products", product_routes_1.default);
 app.use("/api/location", location_routes_1.default);
 app.use("/api/payment", payment_routes_1.default);
+app.use("/api/settings", settings_routes_1.default);
 // ============================
 // Health Check
 // ============================

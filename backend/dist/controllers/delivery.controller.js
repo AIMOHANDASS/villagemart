@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getActiveDeliveryOrders = exports.autoAssignNearestPartner = exports.toggleDeliveryOnline = exports.getDeliveryEarnings = exports.updateDeliveryLocation = exports.updatePartnerDeliveryStatus = exports.acceptOrder = exports.getDeliveryOrders = exports.loginDeliveryPartner = exports.signupDeliveryPartner = exports.triggerOrderNotification = void 0;
+exports.verifyDeliveryOtp = exports.getActiveDeliveryOrders = exports.autoAssignNearestPartner = exports.toggleDeliveryOnline = exports.getDeliveryEarnings = exports.updateDeliveryLocation = exports.updatePartnerDeliveryStatus = exports.acceptOrder = exports.getDeliveryOrders = exports.loginDeliveryPartner = exports.signupDeliveryPartner = exports.triggerOrderNotification = void 0;
 const db_1 = __importDefault(require("../db"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
@@ -48,13 +48,15 @@ db_1.default.query(`CREATE TABLE IF NOT EXISTS delivery_partners (
    POST /api/delivery/signup
 ====================================================== */
 const signupDeliveryPartner = async (req, res) => {
-    const { name, email, phone, password, vehicle_type, vehicle_number, license_number, aadhaar_number } = req.body;
+    const { name, email, phone, password, vehicle_type, vehicle_number, license_number } = req.body;
     if (!name || !email || !phone || !password) {
         return res.status(400).json({ success: false, message: "Name, email, phone, and password are required" });
     }
     const files = req.files;
     const profile_image = files?.['profile_image']?.[0]?.filename || null;
-    const document_url = files?.['document']?.[0]?.filename || null;
+    const dl_document_url = files?.['dl_document']?.[0]?.filename || null;
+    const rc_document_url = files?.['rc_document']?.[0]?.filename || null;
+    const aadhaar_document_url = files?.['aadhaar_document']?.[0]?.filename || null;
     try {
         const checkSql = "SELECT id FROM delivery_partners WHERE email = ? LIMIT 1";
         db_1.default.query(checkSql, [email], async (checkErr, rows) => {
@@ -65,10 +67,10 @@ const signupDeliveryPartner = async (req, res) => {
             const hashedPassword = await bcryptjs_1.default.hash(password, 10);
             const sql = `
         INSERT INTO delivery_partners 
-        (name, phone, email, password, vehicle_type, vehicle_number, \`license number\`, aadhaar_number, profile_image, \`document url\`, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        (name, phone, email, password, vehicle_type, vehicle_number, \`license number\`, profile_image, dl_document_url, rc_document_url, aadhaar_document_url, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
       `;
-            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, aadhaar_number || null, profile_image, document_url], (err, result) => {
+            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, profile_image, dl_document_url, rc_document_url, aadhaar_document_url], (err, result) => {
                 if (err) {
                     console.error("❌ Delivery Partner Signup DB Error:", err);
                     return res.status(500).json({ success: false, message: `Signup failed: ${err.message}` });
@@ -139,6 +141,7 @@ const getDeliveryOrders = (req, res) => {
       u.longitude AS customer_lng,
       o.\`total amount\` AS total_amount,
       o.delivery_fee,
+      o.payment_method,
       o.status,
       o.tracking_status,
       o.delivery_status,
@@ -157,7 +160,12 @@ const getDeliveryOrders = (req, res) => {
     FROM orders o
     JOIN users u ON u.id = o.\`user id\`
     LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
-    WHERE o.delivery_status = 'PENDING_PICKUP' OR (o.delivery_partner_id = ? AND o.delivery_status != 'DELIVERED')
+    WHERE (o.delivery_status = 'PENDING_PICKUP' OR (o.delivery_partner_id = ? AND o.delivery_status != 'DELIVERED'))
+      AND NOT EXISTS (
+        SELECT 1 FROM \`order_items\` oi2 
+        WHERE oi2.order_id = o.id 
+          AND (LOWER(oi2.category) = 'garlands' OR LOWER(oi2.product_name) LIKE '%garland%')
+      )
     ORDER BY o.\`created at\` DESC
   `;
     db_1.default.query(sql, [partnerId || 0], (err, rows) => {
@@ -184,6 +192,7 @@ const getDeliveryOrders = (req, res) => {
                     customer_lng: row.customer_lng,
                     total_amount: Number(row.total_amount),
                     delivery_fee: Number(row.delivery_fee),
+                    payment_method: row.payment_method || "cod",
                     status: row.status,
                     tracking_status: displayTrackingStatus,
                     created_at: row.created_at,
@@ -265,12 +274,13 @@ const updatePartnerDeliveryStatus = (req, res) => {
     const { status } = req.body;
     const partnerId = req.user?.id; // Logged-in delivery partner ID from verifyToken middleware
     // 1. FIRST check the current status to prevent duplicate triggers on double-clicks
-    db_1.default.query("SELECT delivery_status FROM `orders` WHERE id = ?", [orderId], (err, rows) => {
+    db_1.default.query("SELECT delivery_status, payment_method FROM `orders` WHERE id = ?", [orderId], (err, rows) => {
         if (err)
             return res.status(500).json({ success: false, message: err.message });
         if (rows.length === 0)
             return res.status(404).json({ success: false, message: "Order not found" });
         const currentStatus = (rows[0].delivery_status || "").toUpperCase();
+        const paymentMethod = (rows[0].payment_method || "cod").toLowerCase();
         if (currentStatus === status.toUpperCase()) {
             return res.status(400).json({ success: false, message: "Order is already in this status." });
         }
@@ -291,14 +301,12 @@ const updatePartnerDeliveryStatus = (req, res) => {
                 break;
             case "OUT_FOR_DELIVERY":
                 statusField = "OUT_FOR_DELIVERY";
-                timestampColumn = "`out_for_delivery_at` = NOW()";
-                logMessage = `🛵 Order #${orderId} status updated: OUT_FOR_DELIVERY is on the way to your doorstep!`;
+                const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
+                timestampColumn = `\`out_for_delivery_at\` = NOW(), delivery_otp = '${generatedOtp}'`;
+                logMessage = `🛵 Order #${orderId} is OUT_FOR_DELIVERY! Share this OTP: ${generatedOtp} with the driver to receive your order.`;
                 break;
             case "DELIVERED":
-                statusField = "DELIVERED";
-                timestampColumn = "`delivered at` = NOW(), `status` = 'DELIVERED', `tracking_status` = 'DELIVERED'";
-                logMessage = `🎉 Order #${orderId} has been delivered successfully! Thank you for shopping with VillageMart.`;
-                break;
+                return res.status(400).json({ success: false, message: "All orders require OTP verification to complete delivery." });
             default:
                 return res.status(400).json({ success: false, message: "Invalid status pipeline state string" });
         }
@@ -524,7 +532,10 @@ const getActiveDeliveryOrders = (req, res) => {
         o.\`delivery_status\`, 
         o.\`address\`, 
         o.\`phone\`, 
+        o.\`payment_method\`,
         o.\`created at\`,
+        u.latitude AS customer_lat,
+        u.longitude AS customer_lng,
         JSON_ARRAYAGG(
           JSON_OBJECT(
             'id', oi.id,
@@ -546,6 +557,11 @@ const getActiveDeliveryOrders = (req, res) => {
       LEFT JOIN \`order_items\` oi ON o.id = oi.order_id
       WHERE o.\`delivery_status\` != 'DELIVERED' 
         AND o.\`status\` != 'CANCELLED'
+        AND NOT EXISTS (
+          SELECT 1 FROM \`order_items\` oi2 
+          WHERE oi2.order_id = o.id 
+            AND (LOWER(oi2.category) = 'garlands' OR LOWER(oi2.product_name) LIKE '%garland%')
+        )
       GROUP BY o.id
       HAVING distance <= 20
       ORDER BY o.id DESC
@@ -573,3 +589,67 @@ const getActiveDeliveryOrders = (req, res) => {
     });
 };
 exports.getActiveDeliveryOrders = getActiveDeliveryOrders;
+/* ======================================================
+   🔐 VERIFY DELIVERY OTP (For Online Orders)
+   POST /api/delivery/verify-otp
+   Body: { orderId, otp }
+====================================================== */
+const verifyDeliveryOtp = (req, res) => {
+    const { orderId, otp } = req.body;
+    const partnerId = req.user?.id;
+    if (!orderId || !otp) {
+        return res.status(400).json({ success: false, message: "Order ID and OTP are required" });
+    }
+    if (String(otp).length !== 4) {
+        return res.status(400).json({ success: false, message: "OTP must be exactly 4 digits" });
+    }
+    db_1.default.query("SELECT delivery_otp, delivery_status, payment_method, `user id` FROM orders WHERE id = ? AND delivery_partner_id = ? LIMIT 1", [orderId, partnerId], (err, rows) => {
+        if (err)
+            return res.status(500).json({ success: false, message: "Database error" });
+        if (rows.length === 0)
+            return res.status(404).json({ success: false, message: "Order not found or assigned to another partner." });
+        const order = rows[0];
+        const currentStatus = (order.delivery_status || "").toUpperCase();
+        if (currentStatus !== "OUT_FOR_DELIVERY") {
+            return res.status(400).json({
+                success: false,
+                message: `Order is in ${currentStatus} state. OTP verification only allowed for OUT_FOR_DELIVERY orders.`,
+            });
+        }
+        const storedOtp = String(order.delivery_otp || "").trim();
+        const submittedOtp = String(otp).trim();
+        if (!storedOtp) {
+            return res.status(400).json({ success: false, message: "No OTP was generated for this order." });
+        }
+        if (storedOtp !== submittedOtp) {
+            return res.status(400).json({ success: false, message: "Invalid OTP. Please verify with the customer." });
+        }
+        // 🔐 OTP is correct. Complete the delivery!
+        const updateSql = `
+        UPDATE orders 
+        SET delivery_status = 'DELIVERED', 
+            status = 'DELIVERED', 
+            tracking_status = 'DELIVERED', 
+            \`delivered at\` = NOW() 
+        WHERE id = ?
+      `;
+        db_1.default.query(updateSql, [orderId], (updateErr) => {
+            if (updateErr) {
+                console.error("❌ Failed to finalize order via OTP:", updateErr);
+                return res.status(500).json({ success: false, message: "Failed to verify OTP and complete order" });
+            }
+            const logMessage = `🎉 Order #${orderId} has been securely delivered via OTP verification! Thank you for shopping with VillageMart.`;
+            const notifySql = "INSERT INTO `notifications` (`user id`, message, `is read`) VALUES (?, ?, 0)";
+            db_1.default.query(notifySql, [order["user id"], logMessage], (nErr) => {
+                if (nErr)
+                    console.error("❌ Notification layer failure:", nErr);
+            });
+            return res.json({
+                success: true,
+                message: `OTP Verified! Order #${orderId} marked as DELIVERED.`,
+                data: { status: "DELIVERED" },
+            });
+        });
+    });
+};
+exports.verifyDeliveryOtp = verifyDeliveryOtp;

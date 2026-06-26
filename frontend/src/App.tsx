@@ -26,37 +26,92 @@ import { Toaster } from "react-hot-toast";
 import OtpPopup from "@/components/OtpPopup";
 
 /* ======================================================
+   🔍 SUBDOMAIN ROUTING INTERCEPTOR (Runs once on boot)
+====================================================== */
+const enforceSubdomainMocking = () => {
+  if (typeof window === "undefined") return;
+  
+  const hostname = window.location.hostname.toLowerCase();
+  const searchParams = new URLSearchParams(window.location.search);
+  
+  // Only inject the mock if we don't already have the ?app query active
+  if (!searchParams.has("app")) {
+    let activeApp = "";
+    if (hostname.startsWith("admin.")) activeApp = "admin";
+    else if (hostname.startsWith("delivery.")) activeApp = "delivery";
+    else if (hostname.startsWith("transport.")) activeApp = "transport";
+    
+    if (activeApp) {
+      // Map current pathname to ?app context (e.g., /login -> ?app=transport/login)
+      const pathPart = window.location.pathname.replace(/^\/+/, "");
+      const appValue = pathPart ? `${activeApp}/${pathPart}` : activeApp;
+      
+      searchParams.set("app", appValue);
+      const newUrl = `${window.location.pathname}?${searchParams.toString()}`;
+      
+      // Silently rewrite the URL history BEFORE React evaluates the routing tree
+      window.history.replaceState(null, "", newUrl);
+    }
+  }
+};
+// Execute immediately to mock the context seamlessly
+enforceSubdomainMocking();
+
+/* ======================================================
    🔍 HOSTNAME DETECTOR
 ====================================================== */
 export const parseQueryRouting = () => {
-  // 1. Build environment override
   const buildMode = import.meta.env.VITE_APP_MODE;
-  if (buildMode && ["admin", "delivery", "transport", "consumer"].includes(buildMode)) {
-    return { mode: buildMode, subPath: "" };
-  }
+  const isHardcodedMode = buildMode && ["admin", "delivery", "transport", "consumer"].includes(buildMode);
 
-  // 2. Query routing parser
   const searchParams = new URLSearchParams(window.location.search);
   const appRaw = searchParams.get("app") || ""; 
   
-  if (!appRaw) {
-    // 3. Fallback to runtime hostname
-    const hostname = window.location.hostname.toLowerCase();
-    if (hostname.startsWith("admin.") || hostname.includes("villagemart-admin")) return { mode: "admin", subPath: "" };
-    if (hostname.startsWith("delivery.") || hostname.includes("villagemart-delivery")) return { mode: "delivery", subPath: "" };
-    if (hostname.startsWith("transport.") || hostname.includes("villagemart-transport")) return { mode: "transport", subPath: "" };
-    return { mode: "consumer", subPath: "" };
+  // 1. If we have a query parameter (e.g., from the mock interceptor or local dev)
+  if (appRaw) {
+    const [mode, ...subPathParts] = appRaw.split("/");
+    const subPath = subPathParts.join("/");
+    return { 
+      mode: isHardcodedMode ? buildMode : mode, 
+      subPath 
+    };
   }
 
-  const [mode, ...subPathParts] = appRaw.split("/");
-  const subPath = subPathParts.join("/");
+  // 2. Fallback to clean path / hostname parsing
+  const hostname = window.location.hostname.toLowerCase();
+  let mode = "consumer";
   
-  return { mode, subPath };
+  if (hostname.startsWith("admin.") || hostname.includes("villagemart-admin")) mode = "admin";
+  else if (hostname.startsWith("delivery.") || hostname.includes("villagemart-delivery")) mode = "delivery";
+  else if (hostname.startsWith("transport.") || hostname.includes("villagemart-transport")) mode = "transport";
+
+  const subPath = window.location.pathname.replace(/^\/+/, "");
+  
+  return { 
+    mode: isHardcodedMode ? buildMode : mode, 
+    subPath 
+  };
 };
 
 export const navigateToQueryPath = (appMode: string, path: string = "") => {
-  const targetQuery = path ? `?app=${appMode}/${path}` : `?app=${appMode}`;
-  window.location.href = `${window.location.origin}/${targetQuery}`;
+  const hostname = window.location.hostname.toLowerCase();
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+
+  // 1. If running on local machine, use your perfectly working query-based logic
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    const targetQuery = path ? `?app=${appMode}/${path}` : `?app=${appMode}`;
+    window.location.href = `${window.location.origin}/${targetQuery}`;
+    return;
+  }
+
+  // 2. Production Environment: Enforce strict isolated subdomain mapping
+  let targetDomain = "villagesmart.in";
+  if (appMode === "admin") targetDomain = "admin.villagesmart.in";
+  else if (appMode === "delivery") targetDomain = "delivery.villagesmart.in";
+  else if (appMode === "transport") targetDomain = "transport.villagesmart.in";
+
+  // Seamlessly route to the clean subdomain path without query parameters!
+  window.location.href = `https://${targetDomain}${cleanPath}`;
 };
 
 /* ======================================================
@@ -181,22 +236,46 @@ const ConsumerApp: React.FC = () => {
    🚀 ROOT APP — THE UNIFIED ENTRY POINT
 ====================================================== */
 const App: React.FC = () => {
-  const { mode: activeMode } = parseQueryRouting();
+  const { mode: activeMode, subPath } = parseQueryRouting();
 
   useEffect(() => {
-    // Save to global window object for debug access
     (window as any).appMode = activeMode;
 
-    // 🌐 GLOBAL SOCKET CONNECTION (Listens for admin force reloads)
-    // Uses the current window hostname to automatically resolve the backend URL
+    // 🌐 THE ABSOLUTE FIX: FORCE SPLIT FAVICONS BY THE ACTIVE MODE
+    const updateTabFavicon = () => {
+      let faviconTarget = "/logo-consumer.png"; // Default fallback
+      
+      if (activeMode === "admin") faviconTarget = "/logo-admin.png";
+      else if (activeMode === "delivery") faviconTarget = "/logo-delivery.png";
+      else if (activeMode === "transport") faviconTarget = "/logo-transport.png";
+
+      // Locate standard icon links or shortcut tags in the head segment
+      const existingLinks = document.querySelectorAll("link[rel*='icon']");
+      
+      if (existingLinks.length > 0) {
+        existingLinks.forEach((link: any) => {
+          link.href = faviconTarget;
+        });
+      } else {
+        // Fallback create tag if missing
+        const newLink = document.createElement("link");
+        newLink.rel = "icon";
+        newLink.href = faviconTarget;
+        document.head.appendChild(newLink);
+      }
+    };
+
+    // Run the favicon assignment immediately
+    updateTabFavicon();
+
+    // Fixed fallback to point to your live cloud api backend if not local
     const SOCKET_URL = window.location.hostname === "localhost" 
       ? "http://localhost:8080" 
-      : "https://villagesmart.in";
+      : "https://villagemart-api-841907471689.asia-south1.run.app";
       
     const socket = io(SOCKET_URL);
     
     socket.on("system_reload", () => {
-      console.log("⚠️ System Administrator initiated a global reload sequence.");
       window.location.reload();
     });
 
@@ -205,8 +284,15 @@ const App: React.FC = () => {
     };
   }, [activeMode]);
 
+  // Sync internal router histories on mount if deep subPaths exist
+  useEffect(() => {
+    if (subPath && window.location.pathname === "/") {
+      window.history.replaceState(null, "", `/${subPath}${window.location.search}`);
+    }
+  }, [subPath]);
+
   return (
-    <Suspense fallback={<AppLoader label="Application" />}>
+    <Suspense fallback={<AppLoader label={`${activeMode.toUpperCase()} Framework`} />}>
       {activeMode === "admin" && <AdminApp />}
       {activeMode === "delivery" && <DeliveryApp />}
       {activeMode === "transport" && <TransportApp />}

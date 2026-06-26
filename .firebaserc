@@ -1,5 +1,24 @@
 {
   "projects": {
     "default": "villagemart-c7f3d"
-  }
+  },
+  "targets": {
+    "villagemart-c7f3d": {
+      "hosting": {
+        "consumer": [
+          "villagemart-c7f3d"
+        ],
+        "admin": [
+          "villagemart-admin"
+        ],
+        "delivery": [
+          "villagemart-delivery"
+        ],
+        "transport": [
+          "villagemart-transport"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

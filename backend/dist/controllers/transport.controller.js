@@ -71,25 +71,23 @@ const createTransportBooking = (req, res) => {
         }
         const roundedDistance = Number(distanceKm.toFixed(2));
         // Calculate based on vehicle type
-        const vehicle = String(req.body.vehicleType || "auto").toLowerCase();
+        const rawVehicleType = req.body.vehicle_type || req.body.vehicleType || "auto";
+        const vehicle = String(rawVehicleType).toLowerCase();
+        const validatedVehicleType = String(rawVehicleType).toLowerCase().trim();
         let baseRate = 25;
         let perKmRate = 12;
-        let matchedVehicleType = "auto";
         if (vehicle === "scooter" || vehicle === "bike" || vehicle === "scooter/bike") {
             baseRate = 10;
             perKmRate = 8;
-            matchedVehicleType = "Bike"; // Sanitized ENUM fallback
         }
         else if (vehicle === "car") {
             baseRate = 40;
             perKmRate = 18;
-            matchedVehicleType = "Car"; // Sanitized ENUM fallback
         }
         else {
             // Default is auto
             baseRate = 25;
             perKmRate = 12;
-            matchedVehicleType = "Auto"; // Sanitized ENUM fallback
         }
         const chargeAmount = Number((baseRate + roundedDistance * perKmRate).toFixed(2));
         const rideOtp = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
@@ -111,7 +109,7 @@ const createTransportBooking = (req, res) => {
             roundedDistance,
             chargeAmount,
             notes || null,
-            matchedVehicleType,
+            validatedVehicleType,
             rideOtp
         ], (err, result) => {
             if (err) {
@@ -121,7 +119,7 @@ const createTransportBooking = (req, res) => {
             // Initial booking notification
             db_1.default.query("INSERT INTO notifications (`user id`, message) VALUES (?,?)", [
                 Number(userId),
-                `🚕 Transport (${matchedVehicleType}) booked from ${fromAddress} to ${toAddress}. Charge ₹${chargeAmount}`,
+                `🚕 Transport (${validatedVehicleType}) booked from ${fromAddress} to ${toAddress}. Charge ₹${chargeAmount}`,
             ]);
             // 🔐 Send OTP Notification to customer
             db_1.default.query("INSERT INTO notifications (`user id`, message) VALUES (?, ?)", [
@@ -142,7 +140,7 @@ const createTransportBooking = (req, res) => {
                 distance_km: roundedDistance,
                 charge_amount: chargeAmount,
                 rate_per_km: perKmRate,
-                vehicle_type: matchedVehicleType,
+                vehicle_type: validatedVehicleType,
                 otp: rideOtp, // Return OTP to user
             });
         });
@@ -220,6 +218,7 @@ const getUserTransportBookings = (req, res) => {
 exports.getUserTransportBookings = getUserTransportBookings;
 const confirmTransportBooking = (req, res) => {
     const bookingId = Number(req.params.bookingId);
+    const driverId = req.user?.id || null;
     if (!bookingId)
         return res.status(400).json({ message: "Invalid booking id" });
     const sql = `
@@ -238,8 +237,8 @@ const confirmTransportBooking = (req, res) => {
         if (String(row.status).toUpperCase() === "CONFIRMED") {
             return res.status(409).json({ message: "Transport booking already confirmed" });
         }
-        // ✅ FIXED: Sync both status and ride_status columns
-        db_1.default.query("UPDATE transport_bookings SET status='CONFIRMED', ride_status='ACCEPTED' WHERE id=?", [bookingId], (updateErr) => {
+        // 🎯 FIXED: Sync both status and ride_status columns, and assign the driver
+        db_1.default.query("UPDATE transport_bookings SET status='CONFIRMED', ride_status='ACCEPTED', `driver_id`=?, `driver id`=? WHERE id=?", [driverId, driverId, bookingId], (updateErr) => {
             if (updateErr) {
                 console.error("❌ confirmTransportBooking update error:", updateErr);
                 return res.status(500).json({ message: "Failed to confirm transport booking" });
@@ -290,25 +289,28 @@ const getActiveTransportRides = (req, res) => {
     const driverLat = Number(req.query.lat || 10.938354);
     const driverLng = Number(req.query.lng || 78.418579);
     const partnerId = req.user?.id;
-    const checkLockoutSql = `SELECT wallet_balance, commission_due_since FROM transport_partners WHERE id = ?`;
+    const checkLockoutSql = `SELECT wallet_balance, commission_due_since, vehicle_type FROM transport_partners WHERE id = ?`;
     db_1.default.query(checkLockoutSql, [partnerId], (lockErr, partnerResults) => {
         if (lockErr)
             return res.status(500).json({ success: false, error: lockErr.message });
-        if (partnerResults.length > 0) {
-            const { wallet_balance, commission_due_since } = partnerResults[0];
-            if (wallet_balance < 0 && commission_due_since) {
-                const hoursElapsed = (new Date().getTime() - new Date(commission_due_since).getTime()) / (1000 * 60 * 60);
-                if (hoursElapsed >= 30) {
-                    return res.status(402).json({
-                        success: false,
-                        isLockedOut: true,
-                        message: "Ride Stream Locked: Settle outstanding commission balances to clear your application dashboard.",
-                        walletBalance: wallet_balance,
-                        hoursElapsed: Math.floor(hoursElapsed)
-                    });
-                }
+        if (partnerResults.length === 0) {
+            return res.status(404).json({ success: false, message: "Driver profile not found." });
+        }
+        const { wallet_balance, commission_due_since, vehicle_type } = partnerResults[0];
+        if (wallet_balance < 0 && commission_due_since) {
+            const hoursElapsed = (new Date().getTime() - new Date(commission_due_since).getTime()) / (1000 * 60 * 60);
+            if (hoursElapsed >= 30) {
+                return res.status(402).json({
+                    success: false,
+                    isLockedOut: true,
+                    message: "Ride Stream Locked: Settle outstanding commission balances to clear your application dashboard.",
+                    walletBalance: wallet_balance,
+                    hoursElapsed: Math.floor(hoursElapsed)
+                });
             }
         }
+        const driverVehicleType = vehicle_type || "bike";
+        console.log(`🏍️ Driver #${partnerId} requesting feed for vehicle type: ${driverVehicleType}`);
         const sql = `
       SELECT *, (
         6371 * acos(
@@ -319,10 +321,11 @@ const getActiveTransportRides = (req, res) => {
       FROM \`transport_bookings\` 
       WHERE \`ride_status\` = 'BOOKED' 
         AND \`status\` = 'BOOKED'
-      HAVING distance <= 20 
+        AND LOWER(vehicle_type) = LOWER(?)
+      HAVING distance <= 150 
       ORDER BY id DESC
     `;
-        db_1.default.query(sql, [driverLat, driverLng, driverLat], (err, results) => {
+        db_1.default.query(sql, [driverLat, driverLng, driverLat, driverVehicleType], (err, results) => {
             if (err) {
                 console.error("❌ Database query execution crash inside transport controller:", err.message);
                 return res.status(500).json({ success: false, error: err.message });

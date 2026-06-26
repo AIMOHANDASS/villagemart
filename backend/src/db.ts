@@ -21,7 +21,8 @@ if (hostValue.startsWith("/cloudsql/")) {
 } else {
   poolOptions.host = hostValue;
   poolOptions.port = Number(process.env.DB_PORT || 3306);
-  console.log(`💻 Local Development Database Activated: Connected via TCP Port: ${poolOptions.host}:${poolOptions.port}`);
+  poolOptions.ssl = { rejectUnauthorized: false };
+  console.log(`💻 TCP Database Activated: Connected via TCP Port: ${poolOptions.host}:${poolOptions.port} with SSL`);
 }
 
 const db = mysql.createPool(poolOptions);

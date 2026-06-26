@@ -61,6 +61,13 @@ const login = async (req, res) => {
                 return res.status(401).json({ success: false, message: "Invalid account credentials" });
             }
             const activeProfile = results[0];
+            // 🎯 CRITICAL REJECTION GATEWAY: Blocks logins if blocked by the system
+            if (activeProfile.account_status === 'BLOCKED') {
+                return res.status(403).json({
+                    success: false,
+                    message: "Access Denied: Your account is blocked due to an overdue commission payment balance. Please contact VillageMart Admin."
+                });
+            }
             // Match bcrypt password string hashes securely
             const isValidPassword = await bcryptjs_1.default.compare(password, activeProfile.password);
             if (!isValidPassword) {

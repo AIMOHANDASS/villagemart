@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { navigateToQueryPath } from "../App";
 import { API_BASE_URL } from "../api";
 import { GoogleLogin } from "@react-oauth/google";
 import { motion } from "framer-motion";
@@ -45,9 +46,9 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     onLogin(responseData.user); // Maintaining the prop call for App state sync
 
     // Route directly to custom multi-app windows seamlessly via ?app=
-    if (targetRole === "ADMIN") window.location.href = "/?app=admin";
-    else if (targetRole === "TRANSPORT") window.location.href = "/?app=transport";
-    else if (targetRole === "DELIVERY") window.location.href = "/?app=delivery";
+    if (targetRole === "ADMIN") navigateToQueryPath("admin", "");
+    else if (targetRole === "TRANSPORT") navigateToQueryPath("transport", "");
+    else if (targetRole === "DELIVERY") navigateToQueryPath("delivery", "");
     else window.location.href = "/";
   };
 

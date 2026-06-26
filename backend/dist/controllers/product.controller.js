@@ -104,9 +104,11 @@ exports.getProductById = getProductById;
    POST /api/products/add
 ────────────────────────────────────────────────────── */
 const createProduct = (req, res) => {
+    console.log("🛑 [DEBUG] createProduct called with body:", req.body);
     const { E_name, T_name, MRP, s_price, GST, imageurl, category, product_type, inStock, isOrganic, } = req.body;
     // ✅ Validate required fields
     if (!E_name || !category || !product_type) {
+        console.log("❌ [DEBUG] Validation failed:", { E_name, category, product_type });
         return res.status(400).json({
             success: false,
             message: "Missing required fields: E_name, category, product_type",

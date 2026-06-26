@@ -1,0 +1,97 @@
+name: Build Android APKs
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Build ${{ matrix.app-name }}
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - app-name: consumer-app
+            vite-target: client
+            apk-name: villagemart-client.apk
+          - app-name: admin-app
+            vite-target: admin
+            apk-name: villagemart-admin.apk
+          - app-name: delivery-app
+            vite-target: delivery
+            apk-name: villagemart-delivery.apk
+          - app-name: transport-app
+            vite-target: transport
+            apk-name: villagemart-transport.apk
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci || npm install
+
+      - name: Build Vite App (${{ matrix.vite-target }})
+        working-directory: ./frontend
+        run: npm run build:${{ matrix.vite-target }}
+
+      - name: Update Capacitor Target Directory
+        working-directory: ./frontend
+        run: |
+          # Dynamically update capacitor.config.ts to point to the correct dist output
+          sed -i "s|webDir: '.*'|webDir: 'dist/${{ matrix.vite-target }}'|g" capacitor.config.ts
+
+      - name: Capacitor Native Sync
+        working-directory: ./frontend
+        run: npx cap sync android
+
+      - name: Clean Old Default Launcher Icons
+        working-directory: ./frontend/android/app/src/main/res
+        run: |
+          for density in hdpi mdpi xhdpi xxhdpi xxxhdpi; do
+            rm -f mipmap-${density}/ic_launcher.png
+            rm -f mipmap-${density}/ic_launcher_round.png
+            rm -f mipmap-${density}/ic_launcher_foreground.png
+          done
+
+      - name: Inject Custom Brand Assets
+        run: |
+          # Recursively copy all files from the vault into the Android res directory
+          cp -a ./frontend/mobile-icons-vault/${{ matrix.app-name }}/. ./frontend/android/app/src/main/res/
+
+      - name: Make Gradle Wrapper Executable
+        working-directory: ./frontend/android
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        working-directory: ./frontend/android
+        run: |
+          ./gradlew clean
+          ./gradlew assembleDebug
+
+      - name: Rename APK Artifact
+        working-directory: ./frontend/android/app/build/outputs/apk/debug
+        run: mv app-debug.apk ${{ matrix.apk-name }}
+
+      - name: Upload APK to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.apk-name }}
+          path: ./frontend/android/app/build/outputs/apk/debug/${{ matrix.apk-name }}
+          retention-days: 7

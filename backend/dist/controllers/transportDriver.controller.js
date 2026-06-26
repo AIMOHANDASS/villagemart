@@ -49,7 +49,9 @@ const signupTransportPartner = async (req, res) => {
     }
     const files = req.files;
     const profile_image = files?.['profile_image']?.[0]?.filename || null;
-    const document_url = files?.['document']?.[0]?.filename || null;
+    const dl_document_url = files?.['dl_document']?.[0]?.filename || null;
+    const rc_document_url = files?.['rc_document']?.[0]?.filename || null;
+    const aadhaar_document_url = files?.['aadhaar_document']?.[0]?.filename || null;
     try {
         const checkSql = "SELECT id FROM transport_partners WHERE email = ? LIMIT 1";
         db_1.default.query(checkSql, [email], async (checkErr, rows) => {
@@ -60,10 +62,10 @@ const signupTransportPartner = async (req, res) => {
             const hashedPassword = await bcryptjs_1.default.hash(password, 10);
             const sql = `
         INSERT INTO transport_partners 
-        (name, phone, email, password, vehicle_type, vehicle_number, license_number, profile_image, \`document url\`, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        (name, phone, email, password, vehicle_type, vehicle_number, license_number, profile_image, dl_document_url, rc_document_url, aadhaar_document_url, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
       `;
-            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, profile_image, document_url], (err, result) => {
+            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, profile_image, dl_document_url, rc_document_url, aadhaar_document_url], (err, result) => {
                 if (err) {
                     console.error("❌ Transport Partner Signup DB Error:", err);
                     return res.status(500).json({ success: false, message: `Signup failed: ${err.message}` });
@@ -173,6 +175,9 @@ const getDriverBookings = (req, res) => {
             sql += ` WHERE UPPER(tb.status) = ?`;
             params.push(statusFilter);
         }
+        else {
+            sql += ` WHERE UPPER(tb.status) = 'BOOKED' OR UPPER(tb.status) = 'PENDING'`;
+        }
         sql += ` ORDER BY tb.\`created at\` DESC`;
         db_1.default.query(sql, params, (err, rows) => {
             if (err) {
@@ -248,8 +253,8 @@ const acceptRide = (req, res) => {
             return res.status(400).json({ success: false, message: "Ride has already been accepted or is unavailable." });
         }
         const activeBooking = bookings[0];
-        // 2. Query the transport_partners table to fetch this specific driver's Name and Phone Number 🎯
-        const selectDriverSql = "SELECT name, phone FROM `transport_partners` WHERE id = ?";
+        // 2. Query the transport_partners table to fetch this specific driver's Name, Phone, and Vehicle Type 🎯
+        const selectDriverSql = "SELECT name, phone, vehicle_type FROM `transport_partners` WHERE id = ?";
         db_1.default.query(selectDriverSql, [driverId], (dErr, drivers) => {
             if (dErr || drivers.length === 0) {
                 return res.status(500).json({ success: false, message: "Failed to resolve driver credentials." });
@@ -257,6 +262,16 @@ const acceptRide = (req, res) => {
             const driverProfile = drivers[0];
             const driverName = driverProfile.name;
             const driverPhone = driverProfile.phone;
+            const driverVehicle = String(driverProfile.vehicle_type || "").toLowerCase().trim();
+            const requestedVehicle = String(activeBooking.vehicle_type || "").toLowerCase().trim();
+            // 🎯 CRITICAL SECURITY GATEWAY: Enforce case-insensitive fleet matching validation
+            if (driverVehicle && requestedVehicle && driverVehicle !== requestedVehicle) {
+                console.warn(`🚨 Security Violation Blocked: Driver #${driverId} (${driverVehicle}) attempted to take a ${requestedVehicle} order.`);
+                return res.status(403).json({
+                    success: false,
+                    message: `Mismatched Vehicle Type! You drive an ${driverVehicle.toUpperCase()}, but this is a ${requestedVehicle.toUpperCase()} order.`
+                });
+            }
             // 3. Atomically assign the driver and advance status states cleanly
             // Note: we set both driver_id and `driver id` because previous columns might be named ambiguously
             const updateBookingSql = `

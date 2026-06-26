@@ -111,7 +111,7 @@ const Header: React.FC<Props> = ({ user }) => {
           .filter(Boolean);
         setAllProductNames(names);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   /* ================= LOAD RECENT ================= */
@@ -139,22 +139,22 @@ const Header: React.FC<Props> = ({ user }) => {
       try {
         const res = await fetch(`${API_BASE_URL}/notifications/${activeSessionId}`, { headers });
         if (!res.ok) throw new Error("Failed to fetch notification count");
-        
+
         const text = await res.text();
         if (text.includes('<!DOCTYPE') || text.trim().startsWith('<')) {
           console.warn("Intercepted HTML response from notification endpoint, safely defaulting to empty array.");
           setNotifyCount(0);
           return;
         }
-        
+
         const response = JSON.parse(text);
         // Guard clause to ensure object payloads or 401 data cannot crash React
-        const safeArray = Array.isArray(response) 
-          ? response 
+        const safeArray = Array.isArray(response)
+          ? response
           : (response && typeof response === 'object' && Array.isArray((response as any).notifications))
             ? (response as any).notifications
             : [];
-            
+
         const unread = safeArray.filter((item: any) => {
           if (!item || typeof item !== 'object') return false;
           const isReadVal = item.isRead !== undefined ? item.isRead : item.is_read;
@@ -166,7 +166,7 @@ const Header: React.FC<Props> = ({ user }) => {
         setNotifyCount(0); // Safe fallback baseline
       }
     };
-    
+
     fetchNotifications();
   }, [user]);
 
@@ -263,7 +263,7 @@ const Header: React.FC<Props> = ({ user }) => {
 
   return (
     <header className="sticky top-0 z-50 w-full bg-white/80 dark:bg-stone-950/80 backdrop-blur-xl border-b border-stone-200/40 dark:border-stone-800/40 shadow-sm transition-all duration-300">
-      
+
       {/* 📍 MULTI-ADDRESS RIBBON INJECTION */}
       {user && <NavbarLocationRibbon />}
 
@@ -274,9 +274,9 @@ const Header: React.FC<Props> = ({ user }) => {
           <motion.img
             whileHover={{ rotate: [0, -5, 5, 0] }}
             transition={{ duration: 0.4 }}
-            src="/favicon.png"
+            src="/logo-consumer.png"
             alt="VillageMart"
-            className="h-10 w-10 rounded-xl shadow-md"
+            className="h-12 w-auto object-contain"
           />
           <span className="text-xl font-bold text-emerald-600 group-hover:text-emerald-500 transition-colors">VillageMart</span>
         </Link>
@@ -312,11 +312,10 @@ const Header: React.FC<Props> = ({ user }) => {
               <motion.button
                 whileTap={{ scale: 0.85 }}
                 onClick={toggleVoice}
-                className={`relative w-7 h-7 flex items-center justify-center rounded-full transition-all shadow-sm ${
-                  voice.isListening
+                className={`relative w-7 h-7 flex items-center justify-center rounded-full transition-all shadow-sm ${voice.isListening
                     ? "bg-rose-500 text-white shadow-rose-500/40"
                     : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                }`}
+                  }`}
                 title={voice.isListening ? "Stop" : "Voice Search"}
               >
                 {voice.isListening ? (
@@ -347,9 +346,8 @@ const Header: React.FC<Props> = ({ user }) => {
                   <div
                     key={i}
                     onMouseDown={() => doSearch(s)}
-                    className={`px-3 py-2.5 cursor-pointer text-sm flex items-center justify-between rounded-lg transition-all ${
-                      i === 0 ? "bg-emerald-50 dark:bg-emerald-900/20" : "hover:bg-stone-50 dark:hover:bg-stone-800"
-                    }`}
+                    className={`px-3 py-2.5 cursor-pointer text-sm flex items-center justify-between rounded-lg transition-all ${i === 0 ? "bg-emerald-50 dark:bg-emerald-900/20" : "hover:bg-stone-50 dark:hover:bg-stone-800"
+                      }`}
                   >
                     <span>{highlight(s)}</span>
                     {i === 0 && (
@@ -535,7 +533,7 @@ const Header: React.FC<Props> = ({ user }) => {
           </motion.button>
 
           <Link to="/" className="flex items-center gap-2">
-            <img src="/favicon.png" className="h-8 w-8 rounded-xl shadow-sm" />
+            <img src="/logo-consumer.png" alt="VillageMart" className="h-10 w-auto object-contain" />
             <span className="font-black text-emerald-600 text-lg tracking-tight">VillageMart</span>
           </Link>
 
@@ -587,11 +585,10 @@ const Header: React.FC<Props> = ({ user }) => {
                 key={service.key}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => navigate(service.path)}
-                className={`shrink-0 min-w-[120px] rounded-2xl border-2 px-3 py-2.5 flex items-center gap-2.5 transition-all duration-300 shadow-sm ${
-                  active
+                className={`shrink-0 min-w-[120px] rounded-2xl border-2 px-3 py-2.5 flex items-center gap-2.5 transition-all duration-300 shadow-sm ${active
                     ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/30 shadow-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                     : "bg-white/50 dark:bg-stone-900/50 border-stone-200/50 dark:border-stone-800 text-stone-600 dark:text-stone-400 backdrop-blur-sm"
-                }`}
+                  }`}
               >
                 <span className="h-6 w-6 flex items-center justify-center rounded-lg bg-white dark:bg-stone-800 shadow-sm shrink-0">
                   {service.icon}
@@ -630,11 +627,10 @@ const Header: React.FC<Props> = ({ user }) => {
               <motion.button
                 whileTap={{ scale: 0.85 }}
                 onClick={toggleVoice}
-                className={`relative w-8 h-8 flex items-center justify-center rounded-full transition-all shadow-sm ${
-                  voice.isListening
+                className={`relative w-8 h-8 flex items-center justify-center rounded-full transition-all shadow-sm ${voice.isListening
                     ? "bg-rose-500 text-white shadow-rose-500/40"
                     : "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
-                }`}
+                  }`}
               >
                 {voice.isListening ? (
                   <>
@@ -664,9 +660,8 @@ const Header: React.FC<Props> = ({ user }) => {
                   <div
                     key={i}
                     onMouseDown={() => doSearch(s)}
-                    className={`px-3 py-2.5 cursor-pointer text-sm font-medium rounded-lg transition-colors ${
-                      i === 0 ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700" : "hover:bg-stone-50 dark:hover:bg-stone-800"
-                    }`}
+                    className={`px-3 py-2.5 cursor-pointer text-sm font-medium rounded-lg transition-colors ${i === 0 ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700" : "hover:bg-stone-50 dark:hover:bg-stone-800"
+                      }`}
                   >
                     {highlight(s)}
                   </div>

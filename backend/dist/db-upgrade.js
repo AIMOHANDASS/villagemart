@@ -103,6 +103,64 @@ const upgradeDatabase = () => {
         if (!err)
             console.log("✅ Column 'product_type' widened to VARCHAR(50) in products");
     });
+    // 14. ✅ NEW: Create system_settings table for global configuration flags (vehicle availability, etc.)
+    db_1.default.query(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            setting_key VARCHAR(100) NOT NULL UNIQUE,
+            setting_value VARCHAR(255) NOT NULL DEFAULT 'true',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_setting_key (setting_key)
+        )
+    `, (err) => {
+        if (err) {
+            console.error("❌ Failed to create system_settings table:", err.message);
+        }
+        else {
+            console.log("✅ Table 'system_settings' ensured");
+            // Seed default vehicle service availability flags (all enabled)
+            const seedSql = `
+                INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES
+                ('service_active_scooter', 'true'),
+                ('service_active_bike', 'true'),
+                ('service_active_auto', 'true'),
+                ('service_active_car', 'true')
+            `;
+            db_1.default.query(seedSql, (seedErr) => {
+                if (!seedErr)
+                    console.log("✅ Default vehicle service flags seeded in system_settings");
+            });
+        }
+    });
+    // 15. ✅ NEW: Commission Deadline & Account Blocking (Transport)
+    db_1.default.query(`
+        ALTER TABLE transport_partners 
+        ADD COLUMN IF NOT EXISTS pending_commission DECIMAL(10,2) DEFAULT 0.00,
+        ADD COLUMN IF NOT EXISTS commission_deadline DATETIME DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS account_status ENUM('APPROVED', 'PENDING', 'BLOCKED') DEFAULT 'APPROVED'
+    `, (err) => {
+        if (!err)
+            console.log("✅ Commission tracking columns ensured in transport_partners");
+    });
+    // 16. ✅ NEW: Commission Deadline & Account Blocking (Delivery)
+    db_1.default.query(`
+        ALTER TABLE delivery_partners 
+        ADD COLUMN IF NOT EXISTS pending_commission DECIMAL(10,2) DEFAULT 0.00,
+        ADD COLUMN IF NOT EXISTS commission_deadline DATETIME DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS account_status ENUM('APPROVED', 'PENDING', 'BLOCKED') DEFAULT 'APPROVED'
+    `, (err) => {
+        if (!err)
+            console.log("✅ Commission tracking columns ensured in delivery_partners");
+    });
+    // 17. ✅ NEW: Cron Optimization Indexes
+    db_1.default.query(`CREATE INDEX IF NOT EXISTS idx_transport_commission ON transport_partners (account_status, commission_deadline)`, (err) => {
+        if (!err)
+            console.log("✅ Index 'idx_transport_commission' ensured");
+    });
+    db_1.default.query(`CREATE INDEX IF NOT EXISTS idx_delivery_commission ON delivery_partners (account_status, commission_deadline)`, (err) => {
+        if (!err)
+            console.log("✅ Index 'idx_delivery_commission' ensured");
+    });
 };
 exports.upgradeDatabase = upgradeDatabase;
 // Auto-run on import (server.ts uses side-effect import)
