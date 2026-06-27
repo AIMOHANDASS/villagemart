@@ -3,7 +3,13 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.villagemart.app',
   appName: 'VillageMart',
-  webDir: 'dist/client'
+  webDir: 'dist/client',
+  plugins: {
+    GoogleSignIn: {
+      clientId: '841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com',
+      forceCodeForRefreshToken: true,
+    }
+  }
 };
 
 export default config;

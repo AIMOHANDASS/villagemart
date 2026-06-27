@@ -155,7 +155,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
 
       // Initialize the plugin with the Google OAuth client ID
       await GoogleSignIn.initialize({
-        clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        clientId: "841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com",
       });
 
       // Attempt native sign-in
