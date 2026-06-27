@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "841907471689",
+    "project_id": "villagemart-c7f3d",
+    "storage_bucket": "villagemart-c7f3d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:841907471689:android:8617214ab7069580680698",
+        "android_client_info": {
+          "package_name": "com.villagemart.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-co2f19TMSHW6k5aMMyCGP3J2qABhNao"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
