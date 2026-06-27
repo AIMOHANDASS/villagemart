@@ -169,17 +169,12 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         setGoogleAuthError(errMsg);
         toast.error(errMsg, { duration: 6000 });
       }
-    } catch (nativeErr: any) {
-      // ─── DIAGNOSTIC ERROR SURFACING ───
-      const errorCode = nativeErr?.code || nativeErr?.errorCode || "UNKNOWN";
-      const errorMessage = nativeErr?.message || nativeErr?.errorMessage || String(nativeErr);
-      const diagnosticMsg = `Native Auth Error [${errorCode}]: ${errorMessage}`;
-
-      console.error("[GoogleSignIn Native]", diagnosticMsg, nativeErr);
-      setGoogleAuthError(diagnosticMsg);
+    } catch (err: any) {
+      console.error("Full Error Context Object:", JSON.stringify(err, null, 2));
+      setGoogleAuthError(`Code: ${err.code} | Message: ${err.message} | Details: ${JSON.stringify(err)}`);
 
       // Show the exact error code on-screen so you can debug on-device
-      toast.error(diagnosticMsg, {
+      toast.error(`Auth Error: ${err.code}`, {
         duration: 10000,
         style: {
           maxWidth: "90vw",
