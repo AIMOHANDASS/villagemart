@@ -4,4 +4,5 @@
     <string name="title_activity_main">VillageMart</string>
     <string name="package_name">com.villagemart.app</string>
     <string name="custom_url_scheme">com.villagemart.app</string>
+    <string name="server_client_id">841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com</string>
 </resources>
