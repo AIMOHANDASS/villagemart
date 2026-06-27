@@ -65,7 +65,8 @@ const createTransportBooking = (req, res) => {
         }
         const from = { lat: toNum(fromLat), lng: toNum(fromLng) };
         const to = { lat: toNum(toLat), lng: toNum(toLng) };
-        const distanceKm = haversineKm(from, to);
+        // Use provided distance from the client's routing API, otherwise fallback to straight-line Haversine
+        const distanceKm = Number(req.body.distanceKm) || Number(req.body.distance) || haversineKm(from, to);
         if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
             return res.status(400).json({ success: false, message: "Unable to calculate transport distance" });
         }
@@ -89,7 +90,10 @@ const createTransportBooking = (req, res) => {
             baseRate = 25;
             perKmRate = 12;
         }
-        const chargeAmount = Number((baseRate + roundedDistance * perKmRate).toFixed(2));
+        let chargeAmount = Number(req.body.chargeAmount) || Number(req.body.charge);
+        if (!chargeAmount) {
+            chargeAmount = Number((baseRate + roundedDistance * perKmRate).toFixed(2));
+        }
         const rideOtp = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
         const sql = `
       INSERT INTO transport_bookings
@@ -312,17 +316,17 @@ const getActiveTransportRides = (req, res) => {
         const driverVehicleType = vehicle_type || "bike";
         console.log(`🏍️ Driver #${partnerId} requesting feed for vehicle type: ${driverVehicleType}`);
         const sql = `
-      SELECT *, (
+      SELECT *, \`distance km\` AS distance_km, (
         6371 * acos(
           cos(radians(?)) * cos(radians(\`from lat\`)) * cos(radians(\`from_Ing\`) - radians(?)) + 
           sin(radians(?)) * sin(radians(\`from lat\`))
         )
-      ) AS distance 
+      ) AS driver_distance 
       FROM \`transport_bookings\` 
       WHERE \`ride_status\` = 'BOOKED' 
         AND \`status\` = 'BOOKED'
         AND LOWER(vehicle_type) = LOWER(?)
-      HAVING distance <= 150 
+      HAVING driver_distance <= 150 
       ORDER BY id DESC
     `;
         db_1.default.query(sql, [driverLat, driverLng, driverLat, driverVehicleType], (err, results) => {

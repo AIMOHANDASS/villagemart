@@ -280,7 +280,7 @@ exports.getAdminPanelData = getAdminPanelData;
    🛒 CREATE ORDER
 ====================================================== */
 const createOrder = async (req, res) => {
-    const { userId, items, address, phone, paymentMethod } = req.body;
+    const { userId, items, address, phone, paymentMethod, latitude, longitude } = req.body;
     if (!userId || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ message: "❌ Invalid order data" });
     }
@@ -320,14 +320,14 @@ const createOrder = async (req, res) => {
             });
         }
     }
-    const subtotal = items.reduce((sum, i) => sum + Number(i.total_price || 0), 0);
-    // ✅ FIXED: Hardcoded delivery fee — ₹5 flat (free above ₹500)
-    const deliveryFee = subtotal >= 500 ? 0 : 5;
-    const grandTotal = subtotal + deliveryFee;
+    const subtotal = Number(req.body.subtotal) || items.reduce((sum, i) => sum + Number(i.total_price || 0), 0);
+    // ✅ FIXED: Use frontend delivery fee and total to properly include GST!
+    const deliveryFee = req.body.deliveryFee !== undefined ? Number(req.body.deliveryFee) : (subtotal >= 500 ? 0 : 5);
+    const grandTotal = req.body.total ? Number(req.body.total) : (subtotal + deliveryFee);
     const orderSql = `
     INSERT INTO orders 
-    (\`user id\`, \`total amount\`, delivery_fee, status, tracking_status, address, phone, payment_method)
-    VALUES (?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?)
+    (\`user id\`, \`total amount\`, delivery_fee, status, tracking_status, address, phone, payment_method, delivery_latitude, delivery_longitude)
+    VALUES (?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?, ?, ?)
   `;
     db_1.default.query(orderSql, [
         Number(userId),
@@ -336,6 +336,8 @@ const createOrder = async (req, res) => {
         address || "",
         phone || "",
         paymentMethod || "cod",
+        latitude || null,
+        longitude || null,
     ], async (err, result) => {
         if (err) {
             console.error("❌ Create order error:", err);
@@ -344,15 +346,20 @@ const createOrder = async (req, res) => {
         const orderId = result.insertId;
         // ✅ Notify customer: order placed
         createOrderNotification(Number(userId), `🛒 Order #${orderId} placed successfully! Total: ₹${grandTotal.toFixed(2)}`);
-        // ✅ AUTO-ASSIGNMENT LOGIC
-        db_1.default.query("SELECT latitude, longitude FROM users WHERE id = ?", [userId], (locErr, locRows) => {
-            if (!locErr && locRows.length > 0) {
-                const { latitude, longitude } = locRows[0];
-                if (latitude && longitude) {
-                    (0, delivery_controller_1.autoAssignNearestPartner)(orderId, Number(latitude), Number(longitude));
+        // ✅ AUTO-ASSIGNMENT LOGIC: Prioritize explicit checkout coordinates
+        if (latitude && longitude) {
+            (0, delivery_controller_1.autoAssignNearestPartner)(orderId, Number(latitude), Number(longitude));
+        }
+        else {
+            db_1.default.query("SELECT latitude, longitude FROM users WHERE id = ?", [userId], (locErr, locRows) => {
+                if (!locErr && locRows.length > 0) {
+                    const { latitude: uLat, longitude: uLng } = locRows[0];
+                    if (uLat && uLng) {
+                        (0, delivery_controller_1.autoAssignNearestPartner)(orderId, Number(uLat), Number(uLng));
+                    }
                 }
-            }
-        });
+            });
+        }
         const itemSql = `
         INSERT INTO \`order_items\`
         (order_id, product_id, product_name, unit_price, weight, total_price, image, category, deliveryDate, slot)
@@ -644,10 +651,12 @@ const confirmOrder = (req, res) => {
                 oi.unit_price,
                 oi.weight,
                 oi.total_price,
-                oi.image
+                oi.image,
+                p.GST AS gst
               FROM orders o
               JOIN users u ON u.id = o.\`user id\`
               LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+              LEFT JOIN \`products\` p ON oi.product_id = p.id
               WHERE o.id = ?
             `;
                     db_1.default.query(sqlSelect, [orderId], async (err, rows) => {
@@ -660,6 +669,7 @@ const confirmOrder = (req, res) => {
                                 weight: Number(r.weight),
                                 total_price: Number(r.total_price),
                                 image: r.image,
+                                gst: Number(r.gst || 0),
                             }));
                             const order = rows[0];
                             try {
@@ -897,10 +907,12 @@ const updateOrderStatusUnified = (req, res) => {
               oi.unit_price,
               oi.weight,
               oi.total_price,
-              oi.image
+              oi.image,
+              p.GST AS gst
             FROM orders o
             JOIN users u ON u.id = o.\`user id\`
             LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+            LEFT JOIN \`products\` p ON oi.product_id = p.id
             WHERE o.id = ?
           `;
                 db_1.default.query(confirmFetchSql, [orderId], async (fetchErr, rows) => {
@@ -913,6 +925,7 @@ const updateOrderStatusUnified = (req, res) => {
                             weight: Number(r.weight),
                             total_price: Number(r.total_price),
                             image: r.image,
+                            gst: Number(r.gst || 0),
                         }));
                         const order = rows[0];
                         createOrderNotification(order.user_id, `✅ Order #${orderId} confirmed and is being prepared!`);

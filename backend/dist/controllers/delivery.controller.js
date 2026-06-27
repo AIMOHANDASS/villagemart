@@ -137,8 +137,10 @@ const getDeliveryOrders = (req, res) => {
       u.username,
       u.phone AS customer_phone,
       u.address AS customer_address,
-      u.latitude AS customer_lat,
-      u.longitude AS customer_lng,
+      COALESCE(o.delivery_latitude, u.latitude) AS customer_lat,
+      COALESCE(o.delivery_longitude, u.longitude) AS customer_lng,
+      o.delivery_latitude,
+      o.delivery_longitude,
       o.\`total amount\` AS total_amount,
       o.delivery_fee,
       o.payment_method,
@@ -190,6 +192,8 @@ const getDeliveryOrders = (req, res) => {
                     customer_address: row.customer_address,
                     customer_lat: row.customer_lat,
                     customer_lng: row.customer_lng,
+                    delivery_latitude: row.delivery_latitude || row.customer_lat,
+                    delivery_longitude: row.delivery_longitude || row.customer_lng,
                     total_amount: Number(row.total_amount),
                     delivery_fee: Number(row.delivery_fee),
                     payment_method: row.payment_method || "cod",
@@ -343,9 +347,11 @@ const updatePartnerDeliveryStatus = (req, res) => {
                 oi.total_price,
                 oi.image,
                 dp.name AS partner_name,
-                dp.phone AS partner_phone
+                dp.phone AS partner_phone,
+                p.gst
               FROM orders o
               LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+              LEFT JOIN products p ON oi.product_id = p.id
               LEFT JOIN delivery_partners dp ON dp.id = ?
               WHERE o.id = ?
             `;
@@ -363,7 +369,8 @@ const updatePartnerDeliveryStatus = (req, res) => {
                                     unit_price: Number(r.unit_price),
                                     weight: Number(r.weight),
                                     total_price: Number(r.total_price),
-                                    image: r.image
+                                    image: r.image,
+                                    gst: Number(r.gst || 0)
                                 }));
                                 (0, mailer_1.sendDeliveryPartnerAssignedMail)(customerEmail, customerName, orderId, totalAmount, deliveryFee, items, partnerName, partnerPhone);
                             }
@@ -534,8 +541,10 @@ const getActiveDeliveryOrders = (req, res) => {
         o.\`phone\`, 
         o.\`payment_method\`,
         o.\`created at\`,
-        u.latitude AS customer_lat,
-        u.longitude AS customer_lng,
+        COALESCE(o.delivery_latitude, u.latitude) AS customer_lat,
+        COALESCE(o.delivery_longitude, u.longitude) AS customer_lng,
+        o.delivery_latitude,
+        o.delivery_longitude,
         JSON_ARRAYAGG(
           JSON_OBJECT(
             'id', oi.id,
@@ -548,14 +557,14 @@ const getActiveDeliveryOrders = (req, res) => {
         ) AS items,
         (
           6371 * acos(
-            cos(radians(?)) * cos(radians(u.latitude)) * cos(radians(u.longitude) - radians(?)) + 
-            sin(radians(?)) * sin(radians(u.latitude))
+            cos(radians(?)) * cos(radians(COALESCE(o.delivery_latitude, u.latitude))) * cos(radians(COALESCE(o.delivery_longitude, u.longitude)) - radians(?)) + 
+            sin(radians(?)) * sin(radians(COALESCE(o.delivery_latitude, u.latitude)))
           )
         ) AS distance
       FROM \`orders\` o
       JOIN \`users\` u ON o.\`user id\` = u.id
       LEFT JOIN \`order_items\` oi ON o.id = oi.order_id
-      WHERE o.\`delivery_status\` != 'DELIVERED' 
+      WHERE (o.\`delivery_status\` != 'DELIVERED' OR o.\`delivery_status\` IS NULL)
         AND o.\`status\` != 'CANCELLED'
         AND NOT EXISTS (
           SELECT 1 FROM \`order_items\` oi2 
@@ -563,7 +572,6 @@ const getActiveDeliveryOrders = (req, res) => {
             AND (LOWER(oi2.category) = 'garlands' OR LOWER(oi2.product_name) LIKE '%garland%')
         )
       GROUP BY o.id
-      HAVING distance <= 20
       ORDER BY o.id DESC
     `;
         db_1.default.query(fetchOrdersSql, [courierLat, courierLng, courierLat], (err, results) => {

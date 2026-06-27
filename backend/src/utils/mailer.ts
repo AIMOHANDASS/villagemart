@@ -32,6 +32,7 @@ export interface OrderItem {
   weight: number;
   total_price: number;
   image: string;
+  gst?: number;
 }
 
 /* ================= SEND ORDER CONFIRM MAIL ================= */
@@ -54,8 +55,13 @@ export async function sendOrderConfirmMail(
       0
     );
 
+    const totalGst = safeItems.reduce(
+      (sum, item) => sum + (Number(item.total_price || 0) * (Number(item.gst || 0) / 100)),
+      0
+    );
+
     const safeDelivery = Number(deliveryFee || 0);
-    const grandTotal = subtotal + safeDelivery;
+    const grandTotal = subtotal + safeDelivery + totalGst;
 
     const itemsHtml =
       safeItems.length === 0
@@ -70,9 +76,9 @@ export async function sendOrderConfirmMail(
               (item) => `
         <tr>
           <td><img src="${item.image}" width="60"/></td>
-          <td>${item.product_name}</td>
+          <td>${item.product_name} (${item.weight})</td>
           <td>₹${item.unit_price}</td>
-          <td>${item.weight} kg</td>
+          <td>${Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}</td>
           <td>₹${item.total_price}</td>
         </tr>`
             )
@@ -88,15 +94,25 @@ export async function sendOrderConfirmMail(
           <th>Image</th>
           <th>Product</th>
           <th>Unit Price</th>
-          <th>Weight</th>
+          <th>Qty</th>
           <th>Total</th>
         </tr>
         ${itemsHtml}
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Subtotal:</strong></td>
+          <td>₹${subtotal.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Estimated GST:</strong></td>
+          <td>₹${totalGst.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Delivery Fee:</strong></td>
+          <td>₹${safeDelivery.toFixed(2)}</td>
+        </tr>
       </table>
 
-      <p>Subtotal: ₹${subtotal}</p>
-      <p>Delivery Fee: ₹${safeDelivery}</p>
-      <h3>Grand Total: ₹${grandTotal}</h3>
+      <h3>Grand Total: ₹${grandTotal.toFixed(2)}</h3>
 
       <p>Thank you for shopping with VillageMart.</p>
     `;
@@ -136,8 +152,13 @@ export async function sendDeliveryPartnerAssignedMail(
       0
     );
 
+    const totalGst = safeItems.reduce(
+      (sum, item) => sum + (Number(item.total_price || 0) * (Number(item.gst || 0) / 100)),
+      0
+    );
+
     const safeDelivery = Number(deliveryFee || 0);
-    const grandTotal = subtotal + safeDelivery;
+    const grandTotal = subtotal + safeDelivery + totalGst;
 
     const itemsHtml =
       safeItems.length === 0
@@ -152,9 +173,9 @@ export async function sendDeliveryPartnerAssignedMail(
               (item) => `
         <tr>
           <td><img src="${item.image}" width="60"/></td>
-          <td>${item.product_name}</td>
+          <td>${item.product_name} (${item.weight})</td>
           <td>₹${item.unit_price}</td>
-          <td>${item.weight} kg</td>
+          <td>${Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}</td>
           <td>₹${item.total_price}</td>
         </tr>`
             )
@@ -176,15 +197,25 @@ export async function sendDeliveryPartnerAssignedMail(
           <th>Image</th>
           <th>Product</th>
           <th>Unit Price</th>
-          <th>Weight</th>
+          <th>Qty</th>
           <th>Total</th>
         </tr>
         ${itemsHtml}
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Subtotal:</strong></td>
+          <td>₹${subtotal.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Estimated GST:</strong></td>
+          <td>₹${totalGst.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Delivery Fee:</strong></td>
+          <td>₹${safeDelivery.toFixed(2)}</td>
+        </tr>
       </table>
 
-      <p>Subtotal: ₹${subtotal}</p>
-      <p>Delivery Fee: ₹${safeDelivery}</p>
-      <h3>Grand Total: ₹${grandTotal}</h3>
+      <h3>Grand Total: ₹${grandTotal.toFixed(2)}</h3>
 
       <p>You can track your order status in the app.</p>
       <p>Thank you for shopping with VillageMart.</p>

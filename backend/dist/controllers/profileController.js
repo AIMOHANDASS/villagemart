@@ -19,7 +19,12 @@ const getProfile = (req, res) => {
             return res.status(500).json({ message: "DB error" });
         if (rows.length === 0)
             return res.status(404).json({ message: "User not found" });
-        res.json(rows[0]);
+        const userRecord = rows[0];
+        const profilePayload = {
+            ...userRecord,
+            phone: userRecord.phone ? String(userRecord.phone).trim() : ""
+        };
+        res.json(profilePayload);
     });
 };
 exports.getProfile = getProfile;

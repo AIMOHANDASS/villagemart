@@ -107,6 +107,8 @@ export const login = async (req: any, res: any) => {
           name: activeProfile.name,
           username: activeProfile.username || activeProfile.phone,
           email: activeProfile.email || "",
+          phone: activeProfile.phone ? String(activeProfile.phone).trim() : "",
+          address: activeProfile.address || "",
           role: assignedRole
         }
       });
@@ -260,12 +262,16 @@ export const getMe = (req: any, res: Response) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    const userRecord = rows[0];
+    const profilePayload = {
+      ...userRecord,
+      role: responseRole,
+      phone: userRecord.phone ? String(userRecord.phone).trim() : ""
+    };
+
     return res.json({
       success: true,
-      data: {
-        ...rows[0],
-        role: responseRole,
-      },
+      data: profilePayload
     });
   });
 };

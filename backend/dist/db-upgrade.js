@@ -50,18 +50,36 @@ const upgradeDatabase = () => {
         if (!err)
             console.log("✅ Column 'picked at' ensured in orders");
     });
-    db_1.default.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS out_for_delivery_at DATETIME NULL", (err) => {
+    db_1.default.query("ALTER TABLE orders ADD COLUMN out_for_delivery_at DATETIME NULL", (err) => {
         if (!err)
             console.log("✅ Column 'out_for_delivery_at' ensured in orders");
+        else if (err.code !== 'ER_DUP_FIELDNAME')
+            console.error("❌ out_for_delivery_at error:", err.message);
     });
-    db_1.default.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS `delivered at` DATETIME NULL", (err) => {
+    db_1.default.query("ALTER TABLE orders ADD COLUMN delivery_latitude NUMERIC(10, 7) NULL", (err) => {
+        if (!err)
+            console.log("✅ Column 'delivery_latitude' ensured in orders");
+        else if (err.code !== 'ER_DUP_FIELDNAME')
+            console.error("❌ delivery_latitude error:", err.message);
+    });
+    db_1.default.query("ALTER TABLE orders ADD COLUMN delivery_longitude NUMERIC(10, 7) NULL", (err) => {
+        if (!err)
+            console.log("✅ Column 'delivery_longitude' ensured in orders");
+        else if (err.code !== 'ER_DUP_FIELDNAME')
+            console.error("❌ delivery_longitude error:", err.message);
+    });
+    db_1.default.query("ALTER TABLE orders ADD COLUMN `delivered at` DATETIME NULL", (err) => {
         if (!err)
             console.log("✅ Column 'delivered at' ensured in orders");
+        else if (err.code !== 'ER_DUP_FIELDNAME')
+            console.error("❌ delivered at error:", err.message);
     });
     // 7. ✅ NEW: Ensure tracking_status column exists on orders
-    db_1.default.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_status VARCHAR(50) DEFAULT 'PENDING'", (err) => {
+    db_1.default.query("ALTER TABLE orders ADD COLUMN tracking_status VARCHAR(50) DEFAULT 'PENDING'", (err) => {
         if (!err)
             console.log("✅ Column 'tracking_status' ensured in orders");
+        else if (err.code !== 'ER_DUP_FIELDNAME')
+            console.error("❌ tracking_status error:", err.message);
     });
     // 7.b FORCE modify tracking_status to VARCHAR(50)
     db_1.default.query("ALTER TABLE orders MODIFY tracking_status VARCHAR(50) DEFAULT 'PENDING'", (err) => {
