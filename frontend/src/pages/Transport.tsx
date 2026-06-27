@@ -139,7 +139,16 @@ export default function Transport({ user }: TransportProps) {
   const [mapHasError, setMapHasError] = useState(false);
 
   const [customerName, setCustomerName] = useState(user?.name || "");
-  const [customerPhone, setCustomerPhone] = useState(user?.phone || "");
+  const [customerPhone, setCustomerPhone] = useState(() => user?.phone || localStorage.getItem('cached_user_phone') || "");
+
+  useEffect(() => {
+    if (user && user.name) {
+      setCustomerName(user.name);
+    }
+    if (user && user.phone) {
+      setCustomerPhone(String(user.phone).trim());
+    }
+  }, [user]);
 
   const [fromAddress, setFromAddress] = useState("");
   const [fromLat, setFromLat] = useState("");

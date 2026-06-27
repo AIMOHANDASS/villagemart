@@ -51,6 +51,8 @@ interface Order {
   items: OrderItem[];
   customer_lat?: number;
   customer_lng?: number;
+  delivery_latitude?: number;
+  delivery_longitude?: number;
   customer_phone?: string;
   customer_address?: string;
   payment_method?: string;
@@ -255,18 +257,20 @@ export default function DeliveryHome() {
   useEffect(() => {
     if (
       isLoaded &&
+      isOnline &&
       activeOrder &&
-      activeOrder.customer_lat &&
-      activeOrder.customer_lng &&
+      activeOrder.delivery_latitude &&
+      activeOrder.delivery_longitude &&
       driverPos
     ) {
       const directionsService = new window.google.maps.DirectionsService();
+
       directionsService.route(
         {
           origin: { lat: driverPos.lat, lng: driverPos.lng },
           destination: {
-            lat: Number(activeOrder.customer_lat),
-            lng: Number(activeOrder.customer_lng),
+            lat: Number(activeOrder.delivery_latitude),
+            lng: Number(activeOrder.delivery_longitude),
           },
           travelMode: window.google.maps.TravelMode.DRIVING,
         },
@@ -277,7 +281,7 @@ export default function DeliveryHome() {
         },
       );
     }
-  }, [isLoaded, activeOrder, driverPos]);
+  }, [isLoaded, isOnline, activeOrder, driverPos]);
 
   const executeOrdersFetch = async (targetLat: number, targetLng: number) => {
     try {
@@ -315,6 +319,8 @@ export default function DeliveryHome() {
           username: o.customer_name || o.username,
           total_amount: o["total amount"] || o.total_amount,
           created_at: o["created at"] || o.created_at,
+          delivery_latitude: o.delivery_latitude || o.customer_lat,
+          delivery_longitude: o.delivery_longitude || o.customer_lng,
           items: Array.isArray(o.items) ? o.items : [],
         })),
       );
@@ -850,12 +856,12 @@ export default function DeliveryHome() {
 
               // Distance-based accent styling
               let distanceKm = 999;
-              if (driverPos && order.customer_lat && order.customer_lng) {
+              if (driverPos && order.delivery_latitude && order.delivery_longitude) {
                 distanceKm = calculateDistanceKm(
                   driverPos.lat,
                   driverPos.lng,
-                  order.customer_lat,
-                  order.customer_lng,
+                  order.delivery_latitude,
+                  order.delivery_longitude,
                 );
               }
               const isNearby = distanceKm <= 5.0;
@@ -947,9 +953,9 @@ export default function DeliveryHome() {
                         <Phone className="w-3.5 h-3.5" />{" "}
                         {order.customer_phone || "Call Customer"}
                       </a>
-                      {order.customer_lat && order.customer_lng && (
+                      {order.delivery_latitude && order.delivery_longitude && (
                         <a
-                          href={`https://maps.google.com/?daddr=${order.customer_lat},${order.customer_lng}`}
+                          href={`https://maps.google.com/?daddr=${order.delivery_latitude},${order.delivery_longitude}`}
                           target="_blank"
                           rel="noreferrer"
                           className="w-12 h-10 flex items-center justify-center bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
@@ -986,12 +992,12 @@ export default function DeliveryHome() {
                               />
                               <div className="flex flex-col">
                                 <span className="font-bold text-stone-900 text-sm line-clamp-1">
-                                  {item.product_name}
+                                  {item.product_name} ({item.weight})
                                 </span>
                                 <span className="text-xs text-stone-500 font-medium">
                                   Qty:{" "}
                                   <span className="text-emerald-600 font-bold">
-                                    {item.weight || 1}
+                                    {Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}
                                   </span>
                                 </span>
                               </div>
@@ -1061,8 +1067,8 @@ export default function DeliveryHome() {
                                 let clientLng = 78.418579;
 
                                 // 2. Extract and sanitize incoming database row parameters safely
-                                const rawDbLatitude: any = order.customer_lat;
-                                const rawDbLongitude: any = order.customer_lng;
+                                const rawDbLatitude: any = order.delivery_latitude;
+                                const rawDbLongitude: any = order.delivery_longitude;
 
                                 try {
                                   // If coordinates are accidentally stored together or flipped in a single string field 🎯

@@ -1,5 +1,10 @@
 {
 	"appId": "com.villagemart.app",
-	"appName": "VillageMart",
-	"webDir": "dist/client"
+	"appName": "VillageMart Transport Partner",
+	"webDir": "dist/transport",
+	"plugins": {
+		"GoogleSignIn": {
+			"serverClientId": "572559065200-pmjbl017nkf6sonj1pktuv18gro94c1r.apps.googleusercontent.com"
+		}
+	}
 }

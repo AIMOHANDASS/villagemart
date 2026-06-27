@@ -27,7 +27,16 @@ const PartyHall: React.FC<PartyHallProps> = ({ user }) => {
   const navigate = useNavigate();
 
   const [customerName, setCustomerName] = useState(user?.name || "");
-  const [customerPhone, setCustomerPhone] = useState(user?.phone || "");
+  const [customerPhone, setCustomerPhone] = useState(() => user?.phone || localStorage.getItem('cached_user_phone') || "");
+
+  useEffect(() => {
+    if (user && user.name) {
+      setCustomerName(user.name);
+    }
+    if (user && user.phone) {
+      setCustomerPhone(String(user.phone).trim());
+    }
+  }, [user]);
   const [eventDate, setEventDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [personCount, setPersonCount] = useState("50");

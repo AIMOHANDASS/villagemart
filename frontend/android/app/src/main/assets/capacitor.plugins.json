@@ -1,1 +1,10 @@
-[]
+[
+	{
+		"pkg": "@capacitor/camera",
+		"classpath": "com.capacitorjs.plugins.camera.CameraPlugin"
+	},
+	{
+		"pkg": "@capawesome/capacitor-google-sign-in",
+		"classpath": "io.capawesome.capacitorjs.plugins.googlesignin.GoogleSignInPlugin"
+	}
+]

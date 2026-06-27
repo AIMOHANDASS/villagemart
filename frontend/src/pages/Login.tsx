@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { navigateToQueryPath } from "../App";
 import { API_BASE_URL } from "../api";
@@ -8,11 +8,28 @@ import toast from "react-hot-toast";
 
 type Props = { onLogin: (u: any) => void };
 
+/* ──────────────────────────────────────────────────────────
+   🔍 PLATFORM DETECTION UTILITY
+   Checks if we are running inside a Capacitor native shell
+   ────────────────────────────────────────────────────────── */
+const isNativePlatform = (): boolean => {
+  try {
+    return (
+      typeof (window as any).Capacitor !== "undefined" &&
+      (window as any).Capacitor.isNativePlatform?.() === true
+    );
+  } catch {
+    return false;
+  }
+};
+
 const Login: React.FC<Props> = ({ onLogin }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -96,7 +113,10 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     }
   };
 
-  /* ---------------- GOOGLE LOGIN ---------------- */
+  /* ──────────────────────────────────────────────────────────
+     🔐 GOOGLE LOGIN — BACKEND TOKEN EXCHANGE
+     Shared by both native and web paths
+     ────────────────────────────────────────────────────────── */
   const handleGoogleLogin = async (token?: string) => {
     if (!token) return;
 
@@ -118,6 +138,76 @@ const Login: React.FC<Props> = ({ onLogin }) => {
       setError("Google login error");
     }
   };
+
+  /* ──────────────────────────────────────────────────────────
+     📱 NATIVE CAPACITOR GOOGLE SIGN-IN (ANDROID APK)
+     Uses @capawesome/capacitor-google-sign-in when available.
+     Falls back gracefully to web popup if the native plugin
+     is missing, unlinked, or throws an initialization error.
+     ────────────────────────────────────────────────────────── */
+  const handleNativeGoogleSignIn = useCallback(async () => {
+    setIsGoogleLoading(true);
+    setGoogleAuthError(null);
+
+    try {
+      // Dynamically import the Capacitor Google Sign-In plugin
+      const { GoogleSignIn } = await import("@capawesome/capacitor-google-sign-in");
+
+      // Initialize the plugin with the Google OAuth client ID
+      await GoogleSignIn.initialize({
+        clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      });
+
+      // Attempt native sign-in
+      const result = await GoogleSignIn.signIn();
+
+      if (result?.idToken) {
+        toast.success("Native Google Sign-In successful!");
+        await handleGoogleLogin(result.idToken);
+      } else {
+        const errMsg = "Native sign-in returned no ID token";
+        setGoogleAuthError(errMsg);
+        toast.error(errMsg, { duration: 6000 });
+      }
+    } catch (nativeErr: any) {
+      // ─── DIAGNOSTIC ERROR SURFACING ───
+      const errorCode = nativeErr?.code || nativeErr?.errorCode || "UNKNOWN";
+      const errorMessage = nativeErr?.message || nativeErr?.errorMessage || String(nativeErr);
+      const diagnosticMsg = `Native Auth Error [${errorCode}]: ${errorMessage}`;
+
+      console.error("[GoogleSignIn Native]", diagnosticMsg, nativeErr);
+      setGoogleAuthError(diagnosticMsg);
+
+      // Show the exact error code on-screen so you can debug on-device
+      toast.error(diagnosticMsg, {
+        duration: 10000,
+        style: {
+          maxWidth: "90vw",
+          fontSize: "12px",
+          wordBreak: "break-word",
+        },
+      });
+
+      // ─── GRACEFUL WEB FALLBACK ───
+      // If native plugin fails, try the web-based GSI popup as backup
+      toast("Trying web-based Google login as fallback...", { icon: "🔄", duration: 3000 });
+
+      try {
+        // Attempt to trigger the GSI one-tap or prompt
+        if (typeof (window as any).google !== "undefined") {
+          (window as any).google.accounts.id.prompt();
+        } else {
+          toast.error("Google Identity Services not available in this environment", { duration: 5000 });
+        }
+      } catch (webErr: any) {
+        const webErrMsg = `Web fallback also failed: ${webErr?.message || String(webErr)}`;
+        console.error("[GoogleSignIn Web Fallback]", webErrMsg);
+        toast.error(webErrMsg, { duration: 8000 });
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4">
@@ -174,7 +264,17 @@ const Login: React.FC<Props> = ({ onLogin }) => {
           </motion.p>
         )}
 
-
+        {/* INLINE NATIVE AUTH DIAGNOSTIC BANNER */}
+        {googleAuthError && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl mb-4 text-xs border border-amber-300 dark:border-amber-700 break-words"
+          >
+            <p className="font-semibold text-amber-800 dark:text-amber-300 mb-1">Debug Info:</p>
+            <p className="text-amber-700 dark:text-amber-400 font-mono">{googleAuthError}</p>
+          </motion.div>
+        )}
 
         {/* USERNAME */}
         <motion.div
@@ -258,16 +358,51 @@ const Login: React.FC<Props> = ({ onLogin }) => {
           <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
         </div>
 
-        {/* GOOGLE LOGIN */}
+        {/* ──────────────────────────────────────────────
+            GOOGLE LOGIN — ALWAYS VISIBLE, DUAL PATH
+            Native Capacitor path for APK builds
+            Web GSI iframe path for browser environments
+        ────────────────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.6 }}
         >
-          <GoogleLogin
-            onSuccess={(res) => handleGoogleLogin(res.credential)}
-            onError={() => setError("Google login cancelled")}
-          />
+          {isNativePlatform() ? (
+            /* ─── NATIVE APK: Custom styled button that is ALWAYS visible ─── */
+            <button
+              type="button"
+              onClick={handleNativeGoogleSignIn}
+              disabled={isGoogleLoading}
+              className="w-full flex items-center justify-center gap-3 p-3.5 rounded-xl
+                         border border-gray-200 dark:border-gray-700
+                         bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750
+                         text-gray-700 dark:text-gray-200 font-medium
+                         transition-all duration-300 shadow-sm hover:shadow-md
+                         disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isGoogleLoading ? (
+                <svg className="animate-spin h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 48 48">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                </svg>
+              )}
+              {isGoogleLoading ? "Signing in..." : "Sign in with Google"}
+            </button>
+          ) : (
+            /* ─── WEB BROWSER: Standard GSI iframe button ─── */
+            <GoogleLogin
+              onSuccess={(res) => handleGoogleLogin(res.credential)}
+              onError={() => setError("Google login cancelled")}
+            />
+          )}
         </motion.div>
 
         {/* SIGNUP LINK */}

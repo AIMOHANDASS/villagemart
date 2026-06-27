@@ -23,6 +23,7 @@ import AppRoutes from "./router";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import AiAssistant from "@/components/AiAssistant";
 import { Toaster } from "react-hot-toast";
+import { API_BASE_URL } from "@/api/apiClient";
 import OtpPopup from "@/components/OtpPopup";
 
 /* ======================================================
@@ -163,8 +164,28 @@ const ConsumerApp: React.FC = () => {
   /* ✅ Login */
   const handleLogin = (userObj: any) => {
     localStorage.setItem("user", JSON.stringify(userObj));
+    localStorage.setItem("cached_user_phone", userObj?.phone || "");
     setUser(userObj);
   };
+
+  /* ✅ Re-Sync Session with Backend */
+  useEffect(() => {
+    if (user && user.id) {
+      fetch(`${API_BASE_URL}/profile/${user.id}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.id) {
+            const freshUser = { ...user, ...data };
+            setUser(freshUser);
+            localStorage.setItem("user", JSON.stringify(freshUser));
+            if (freshUser.phone) {
+              localStorage.setItem("cached_user_phone", String(freshUser.phone).trim());
+            }
+          }
+        })
+        .catch(err => console.error("Failed to sync session:", err));
+    }
+  }, []);
 
   /* ✅ Logout */
   const handleLogout = () => {

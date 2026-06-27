@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import { parseCustomQuantityInput, formatInitialDisplay } from "../utils/quantityParser";
+import { validateProfileStatus } from "./Profile";
 import { API_BASE_URL } from "@/api/apiClient";
 
 interface CartItem {
@@ -66,6 +67,7 @@ const pageVariants = {
 
 const Cart: React.FC<CartProps> = ({ user }) => {
   const navigate = useNavigate();
+  const isProfileComplete = useMemo(() => validateProfileStatus(user), [user]);
 
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
     const raw = localStorage.getItem("cart");
@@ -83,8 +85,13 @@ const Cart: React.FC<CartProps> = ({ user }) => {
           const rows = json.data || json || [];
           setCartItems(prev => prev.map(item => {
             const liveProduct = rows.find((r: any) => String(r.id) === String(item.id));
-            if (liveProduct && liveProduct.inStock !== undefined) {
-              return { ...item, stock: Number(liveProduct.inStock) || 0 };
+            if (liveProduct) {
+              return { 
+                ...item, 
+                stock: liveProduct.inStock !== undefined ? Number(liveProduct.inStock) || 0 : item.stock,
+                gst: Number(liveProduct.GST || liveProduct.gst || 0),
+                sale_price: Number(liveProduct.s_price || liveProduct.sale_price || 0)
+              };
             }
             return item;
           }));
@@ -475,11 +482,32 @@ const Cart: React.FC<CartProps> = ({ user }) => {
                   </div>
 
                   <div className="pt-2 hidden lg:block">
+                    {!isProfileComplete && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-xl mb-4 shadow-sm"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-amber-500 text-lg">⚠️</span>
+                          <p className="text-amber-800 text-xs font-medium text-left leading-tight">
+                            Order Blocked: Add a valid 10-digit Phone Number & Address in Profile to proceed.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
                     <motion.button
-                      whileHover={{ scale: 1.02, y: -2 }}
-                      whileTap={{ scale: 0.97 }}
-                      className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 text-white font-bold text-lg shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 transition-all duration-300"
-                      onClick={proceedToCheckout}
+                      disabled={!isProfileComplete}
+                      whileHover={isProfileComplete ? { scale: 1.02, y: -2 } : {}}
+                      whileTap={isProfileComplete ? { scale: 0.97 } : {}}
+                      className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all duration-300 ${isProfileComplete ? 'bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40' : 'bg-gray-400 text-white cursor-not-allowed opacity-70'}`}
+                      onClick={(e) => {
+                        if (!isProfileComplete) {
+                          e.preventDefault();
+                          return;
+                        }
+                        proceedToCheckout();
+                      }}
                     >
                       Proceed to Checkout
                       <ArrowRight className="h-5 w-5" />
@@ -511,9 +539,16 @@ const Cart: React.FC<CartProps> = ({ user }) => {
             <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">₹{total.toFixed(2)}</span>
           </div>
           <motion.button
-            whileTap={{ scale: 0.95 }}
-            className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 text-white font-bold text-base shadow-lg shadow-emerald-500/25 transition-all duration-300"
-            onClick={proceedToCheckout}
+            disabled={!isProfileComplete}
+            whileTap={isProfileComplete ? { scale: 0.95 } : {}}
+            className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-base shadow-lg transition-all duration-300 ${isProfileComplete ? 'bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-emerald-500/25' : 'bg-gray-400 text-white cursor-not-allowed opacity-70'}`}
+            onClick={(e) => {
+               if (!isProfileComplete) {
+                 e.preventDefault();
+                 return;
+               }
+               proceedToCheckout();
+            }}
           >
             Checkout
             <ArrowRight className="h-4 w-4" />

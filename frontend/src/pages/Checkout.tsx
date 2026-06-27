@@ -10,6 +10,7 @@ import { API_BASE_URL, apiClient } from "../api";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import { parseCustomQuantityInput } from "../utils/quantityParser";
+import { validateProfileStatus } from "./Profile";
 
 declare global {
   interface Window {
@@ -55,9 +56,20 @@ const pageVariants = {
   animate: { opacity: 1, y: 0 },
 };
 
+const checkoutConfigs = {
+  products: { cashLabel: "Cash on Delivery", cashSub: "Pay when you receive", btnLabel: "Confirm Payment & Place Booking" },
+  transport: { cashLabel: "Pay Cash to Driver", cashSub: "Pay the driver directly after your ride is complete", btnLabel: "Confirm & Place Booking" },
+  partyHall: { cashLabel: "Pay Cash at Venue", cashSub: "Pay your booking balance or advance directly at the venue office", btnLabel: "Confirm & Book Now" }
+};
+
 const Checkout: React.FC<CheckoutProps> = ({ user }) => {
   const navigate = useNavigate();
   const location = useLocation();
+
+  const isProfileComplete = useMemo(() => {
+    const cleanPhone = String(user?.phone || '').replace(/^\+91|^91|\s+/g, '');
+    return !!(user?.name && user?.address && /^[6-9]\d{9}$/.test(cleanPhone));
+  }, [user]);
 
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [draft, setDraft] = useState<BookingDraft | null>(null);
@@ -128,12 +140,32 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
 
   const mode: CheckoutMode = draft?.type || "products";
 
-  const productSubtotal = useMemo(
-    () => cartItems.reduce((sum, item: any) => sum + (item.calculatedUnitPrice || item.price) * item.quantity, 0),
-    [cartItems]
-  );
+  const { productSubtotal, totalGstAccumulator } = useMemo(() => {
+    return cartItems.reduce(
+      (acc, item: any) => {
+        // 🎯 CRITICAL MATH FIX: We MUST prioritize 'calculatedUnitPrice' because Cart.tsx pre-multiplies
+        // the weight for 'solid' and 'liquid' items (e.g., 5kg). If we read 'sale_price' directly, 
+        // it ignores the weight multiplier and defaults the item value to a 1kg base rate.
+        const itemPrice = Number(item.calculatedUnitPrice || item.sale_price || item.price || 0);
+        const itemQty = Number(item.quantity || 1);
+        const itemGstRate = Number(item.gst || item.GST || item.gst_percentage || 0);
+        
+        const itemSubtotal = itemPrice * itemQty;
+        const calculatedItemTax = itemSubtotal * (itemGstRate / 100);
+        return {
+          productSubtotal: acc.productSubtotal + itemSubtotal,
+          totalGstAccumulator: acc.totalGstAccumulator + calculatedItemTax,
+        };
+      },
+      { productSubtotal: 0, totalGstAccumulator: 0 }
+    );
+  }, [cartItems]);
+
   const productDeliveryFee = productSubtotal >= 500 ? 0 : 5;
-  const productTotal = productSubtotal + productDeliveryFee;
+  const productGst = Math.round(totalGstAccumulator * 100) / 100;
+  const productTotal = Math.round((productSubtotal + productDeliveryFee + productGst) * 100) / 100;
+
+  const currentConfig = checkoutConfigs[mode as keyof typeof checkoutConfigs] || checkoutConfigs.products;
 
   const payableAmount = useMemo(() => {
     if (mode === "transport") return Number(draft?.payload?.chargeAmount || 0);
@@ -201,6 +233,8 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
         address: activeAddress ? `[${activeAddress.address_label}] ${activeAddress.full_address}` : (user?.address || ""),
         phone: user?.phone || "",
         paymentMethod,
+        latitude: activeAddress ? activeAddress.latitude : user?.latitude,
+        longitude: activeAddress ? activeAddress.longitude : user?.longitude,
       }),
     });
 
@@ -230,6 +264,8 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
       toLng: Number(p.toLng),
       vehicleType: p.vehicleType || "auto",
       notes: p.notes || "",
+      distanceKm: Number(p.distanceKm || p.distance || 0),
+      chargeAmount: Number(p.chargeAmount || p.charge || 0),
     };
 
     if (!payload.userId || isNaN(payload.fromLat) || isNaN(payload.toLat)) {
@@ -340,6 +376,7 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
         </h3>
         <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 space-y-2 text-sm">
           <p className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-medium">₹{productSubtotal.toFixed(2)}</span></p>
+          <p className="flex justify-between"><span className="text-muted-foreground">Estimated GST</span><span className="font-medium">₹{productGst.toFixed(2)}</span></p>
           <p className="flex justify-between"><span className="text-muted-foreground">Delivery Fee</span><span className="font-medium">₹{productDeliveryFee.toFixed(2)}</span></p>
           <div className="border-t pt-2 mt-2">
             <p className="flex justify-between text-base font-bold"><span>Total</span><span className="text-primary">₹{productTotal.toFixed(2)}</span></p>
@@ -489,8 +526,8 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
                       <Banknote className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="font-semibold text-sm">Cash on Delivery</p>
-                      <p className="text-xs text-muted-foreground">Pay when you receive</p>
+                      <p className="font-semibold text-sm">{currentConfig.cashLabel}</p>
+                      <p className="text-xs text-muted-foreground">{currentConfig.cashSub}</p>
                     </div>
                     {paymentMethod === "cod" && (
                       <CheckCircle className="h-5 w-5 text-primary ml-auto" />
@@ -537,11 +574,36 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
               </p>
             </motion.div>
 
+            {!isProfileComplete && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-amber-50 dark:bg-amber-900/30 border-l-4 border-amber-500 p-4 rounded-xl mb-4 shadow-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-amber-500 text-xl">⚠️</span>
+                  <p className="text-amber-800 dark:text-amber-200 text-sm font-medium">
+                    Order Blocked: You must add a valid 10-digit Phone Number and a delivery Address in your Profile tab before placing an order.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
               <Button
-                disabled={placing}
-                onClick={placeOrder}
-                className="w-full h-14 text-lg bg-gradient-to-r from-primary to-emerald-600 hover:from-primary/90 hover:to-emerald-500 rounded-xl shadow-lg shadow-primary/30 hover:shadow-xl transition-all duration-300 ripple-container"
+                disabled={placing || !isProfileComplete}
+                onClick={(e) => {
+                  if (!isProfileComplete) {
+                    e.preventDefault();
+                    return;
+                  }
+                  placeOrder();
+                }}
+                className={`w-full h-14 text-lg rounded-xl shadow-lg transition-all duration-300 ripple-container ${
+                  isProfileComplete 
+                    ? "bg-gradient-to-r from-primary to-emerald-600 hover:from-primary/90 hover:to-emerald-500 shadow-primary/30 hover:shadow-xl text-white" 
+                    : "bg-gray-400 cursor-not-allowed opacity-70 text-white"
+                }`}
               >
                 {placing ? (
                   <motion.div
@@ -553,7 +615,7 @@ const Checkout: React.FC<CheckoutProps> = ({ user }) => {
                 ) : (
                   <>
                     <ShieldCheck className="mr-2 h-5 w-5" />
-                    Confirm Payment & Place Booking
+                    {currentConfig.btnLabel}
                   </>
                 )}
               </Button>
