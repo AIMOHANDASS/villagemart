@@ -12,7 +12,20 @@
           "package_name": "com.villagemart.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.villagemart.app",
+            "certificate_hash": "80d6779534031103255b9c4dd4657e285d8084ad"
+          }
+        },
+        {
+          "client_id": "841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyA-co2f19TMSHW6k5aMMyCGP3J2qABhNao"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
