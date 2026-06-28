@@ -53,10 +53,10 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     // We are deliberately reverting back to the single generic 'jwt_token' key
     // This will cause 403 Access Denied cross-contamination bugs when switching apps!
     localStorage.setItem("jwt_token", responseData.token);
-    
+
     // Maintain old fallback keys just in case
     if (targetRole === "ADMIN") localStorage.setItem("admin_token", responseData.token);
-    
+
     // Set user and role (Transport/Delivery subapps expect "role")
     localStorage.setItem("role", targetRole);
     localStorage.setItem("user", JSON.stringify(responseData.user));
@@ -155,7 +155,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
 
       // Initialize the plugin with the Google OAuth client ID
       await GoogleSignIn.initialize({
-        clientId: "841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com",
+        clientId: "841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com",
       });
 
       // Attempt native sign-in

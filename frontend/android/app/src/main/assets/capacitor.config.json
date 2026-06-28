@@ -4,7 +4,7 @@
 	"webDir": "dist/client",
 	"plugins": {
 		"GoogleSignIn": {
-			"clientId": "841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com",
+			"clientId": "841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com",
 			"forceCodeForRefreshToken": true
 		}
 	}
