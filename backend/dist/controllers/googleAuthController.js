@@ -7,7 +7,8 @@ exports.googleAuth = void 0;
 const google_auth_library_1 = require("google-auth-library");
 const db_1 = __importDefault(require("../db"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const client = new google_auth_library_1.OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// Dynamically initialized using the strict string (trimmed to prevent trailing space bugs)
+const client = new google_auth_library_1.OAuth2Client(process.env.GOOGLE_CLIENT_ID?.trim());
 /* =========================
    GOOGLE LOGIN / SIGNUP
    POST /api/auth/google
@@ -18,29 +19,34 @@ const googleAuth = async (req, res) => {
         return res.status(400).json({ message: "Token required" });
     }
     try {
+        const targetAudience = process.env.GOOGLE_CLIENT_ID?.trim();
+        // 1. SECURE JWT VERIFICATION LOGIC
         const ticket = await client.verifyIdToken({
             idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID,
+            audience: targetAudience,
         });
         const payload = ticket.getPayload();
         if (!payload) {
-            return res.status(401).json({ message: "Invalid Google token" });
+            return res.status(401).json({ message: "Invalid Google token payload" });
         }
         const { email, name, sub: googleId } = payload;
         if (!email) {
-            return res.status(400).json({ message: "Email not found" });
+            return res.status(400).json({ message: "Email not found in Google payload" });
         }
-        /* 🔍 CHECK USER */
+        /* 3. AUTOMATED USER REGISTRATION & DATABASE UPSERT CHECK */
         db_1.default.query("SELECT * FROM users WHERE email = ? LIMIT 1", [email], (err, rows) => {
             if (err) {
-                return res.status(500).json({ message: "Database error" });
+                console.error("Database query error:", err);
+                return res.status(500).json({ message: "Database verification error" });
             }
-            // ✅ USER EXISTS → LOGIN
+            // ✅ USER EXISTS → UPDATE & LOGIN
             if (rows.length > 0) {
                 const user = rows[0];
+                // Perform lightweight update for latest name (safely ignoring google_id to avoid schema crashes)
+                db_1.default.query("UPDATE users SET name = ? WHERE id = ?", [name || user.name, user.id]);
                 delete user.password;
                 const role = (user.role || "CUSTOMER").toUpperCase();
-                const token = (0, auth_middleware_1.generateToken)({
+                const authToken = (0, auth_middleware_1.generateToken)({
                     id: user.id,
                     username: user.username,
                     role,
@@ -48,7 +54,7 @@ const googleAuth = async (req, res) => {
                 return res.json({
                     success: true,
                     message: "Google Login successful",
-                    token,
+                    token: authToken,
                     role,
                     user_id: user.id,
                     user: {
@@ -59,12 +65,15 @@ const googleAuth = async (req, res) => {
             }
             // ✅ NEW USER → SIGNUP
             const username = email.split("@")[0] + "_" + Math.floor(Math.random() * 1000);
+            // We specifically avoid injecting 'google_id' into the raw insert to prevent missing column crashes,
+            // relying on the password field to track the provider type safely.
             db_1.default.query(`INSERT INTO users (name, username, email, phone, password, role)
            VALUES (?, ?, ?, ?, ?, ?)`, [name || "Google User", username, email, "0000000000", "GOOGLE_AUTH", "CUSTOMER"], (err, result) => {
                 if (err) {
-                    return res.status(500).json({ message: "Signup failed" });
+                    console.error("Database insert error:", err);
+                    return res.status(500).json({ message: "Signup database insertion failed" });
                 }
-                const token = (0, auth_middleware_1.generateToken)({
+                const authToken = (0, auth_middleware_1.generateToken)({
                     id: result.insertId,
                     username,
                     role: "CUSTOMER",
@@ -72,7 +81,7 @@ const googleAuth = async (req, res) => {
                 return res.json({
                     success: true,
                     message: "Google Signup successful",
-                    token,
+                    token: authToken,
                     role: "CUSTOMER",
                     user_id: result.insertId,
                     user: {
@@ -88,8 +97,8 @@ const googleAuth = async (req, res) => {
         });
     }
     catch (error) {
-        console.error("Google auth error:", error);
-        return res.status(500).json({ message: "Google authentication failed" });
+        console.error("Google authentication handshake error:", error);
+        return res.status(500).json({ message: "Google authentication token verification failed" });
     }
 };
 exports.googleAuth = googleAuth;
