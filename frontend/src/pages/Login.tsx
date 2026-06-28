@@ -5,6 +5,7 @@ import { API_BASE_URL } from "../api";
 import { GoogleLogin } from "@react-oauth/google";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
+import { Capacitor } from "@capacitor/core";
 
 type Props = { onLogin: (u: any) => void };
 
@@ -153,9 +154,16 @@ const Login: React.FC<Props> = ({ onLogin }) => {
       // Dynamically import the Capacitor Google Sign-In plugin
       const { GoogleSignIn } = await import("@capawesome/capacitor-google-sign-in");
 
+      const isAndroid = Capacitor.getPlatform() === "android";
+
+      // Dynamically select the correct client ID based on running environment
+      const targetClientId = isAndroid
+        ? import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID // Capawesome native Android requires the global Web Client ID for its backend token swap
+        : import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID;
+
       // Initialize the plugin with the Google OAuth client ID
       await GoogleSignIn.initialize({
-        clientId: "841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com",
+        clientId: targetClientId,
       });
 
       // Attempt native sign-in
@@ -170,7 +178,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         toast.error(errMsg, { duration: 6000 });
       }
     } catch (err: any) {
-      console.error("Full Error Context Object:", JSON.stringify(err, null, 2));
+      console.error("OAuth Execution Error:", JSON.stringify(err));
       setGoogleAuthError(`Code: ${err.code} | Message: ${err.message} | Details: ${JSON.stringify(err)}`);
 
       // Show the exact error code on-screen so you can debug on-device

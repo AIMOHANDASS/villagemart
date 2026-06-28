@@ -1,4 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import * as dotenv from 'dotenv';
+
+// Load .env file (useful for local syncs)
+dotenv.config();
 
 const config: CapacitorConfig = {
   appId: 'com.villagemart.app',
@@ -6,7 +10,7 @@ const config: CapacitorConfig = {
   webDir: 'dist/client',
   plugins: {
     GoogleSignIn: {
-      clientId: '841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com',
+      clientId: process.env.VITE_GOOGLE_WEB_CLIENT_ID || '',
       forceCodeForRefreshToken: true,
     }
   }
