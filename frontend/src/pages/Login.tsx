@@ -154,16 +154,18 @@ const Login: React.FC<Props> = ({ onLogin }) => {
       // Dynamically import the Capacitor Google Sign-In plugin
       const { GoogleSignIn } = await import("@capawesome/capacitor-google-sign-in");
 
-      const isAndroid = Capacitor.getPlatform() === "android";
+      const isAndroid = Capacitor.getPlatform() === 'android';
 
-      // Dynamically select the correct client ID based on running environment
-      const targetClientId = isAndroid
-        ? import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID // Capawesome native Android requires the global Web Client ID for its backend token swap
-        : import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID;
+      // Safety check: Fallback strings used seamlessly across environments
+      const webId = import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID || '841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com';
+      const androidId = import.meta.env.VITE_GOOGLE_ANDROID_CLIENT_ID || '841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com';
+
+      // Route target parameter safely based on application container execution
+      const activeClientId = isAndroid ? webId : webId;
 
       // Initialize the plugin with the Google OAuth client ID
       await GoogleSignIn.initialize({
-        clientId: targetClientId,
+        clientId: activeClientId,
       });
 
       // Attempt native sign-in
