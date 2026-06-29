@@ -1,5 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from "react";
 import { io } from "socket.io-client";
+import { useLocation, useNavigate } from "react-router-dom";
+import { App as CapacitorApp } from "@capacitor/app";
 
 /* ======================================================
    🌐 HOSTNAME-BASED APP ROUTER
@@ -258,6 +260,25 @@ const ConsumerApp: React.FC = () => {
 ====================================================== */
 const App: React.FC = () => {
   const { mode: activeMode, subPath } = parseQueryRouting();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // 🛡️ NATIVE ANDROID PHYSICAL BACK BUTTON HARDENING
+  useEffect(() => {
+    const backButtonListener = CapacitorApp.addListener('backButton', () => {
+      if (location.pathname === '/' || location.pathname === '') {
+        // Absolute root view: allow native exit
+        CapacitorApp.exitApp();
+      } else {
+        // History stack exists: step backward cleanly
+        navigate(-1);
+      }
+    });
+
+    return () => {
+      backButtonListener.then(listener => listener.remove());
+    };
+  }, [location, navigate]);
 
   useEffect(() => {
     (window as any).appMode = activeMode;

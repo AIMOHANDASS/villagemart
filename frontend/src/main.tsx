@@ -11,7 +11,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <GoogleOAuthProvider
-      clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}
+      clientId={import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID || '841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com'}
     >
       <ThemeProvider>
         <BrowserRouter>

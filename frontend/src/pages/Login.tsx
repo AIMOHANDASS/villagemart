@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { navigateToQueryPath } from "../App";
 import { API_BASE_URL } from "../api";
 import { GoogleLogin } from "@react-oauth/google";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { Capacitor } from "@capacitor/core";
+import ComplianceFooter from "../components/ComplianceFooter";
 
 type Props = { onLogin: (u: any) => void };
 
@@ -153,22 +154,24 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     try {
       // Dynamically import the Capacitor Google Sign-In plugin
       const { GoogleSignIn } = await import("@capawesome/capacitor-google-sign-in");
+      
+      const currentPlatform = Capacitor.getPlatform();
+      const isAndroid = currentPlatform === 'android';
 
-      const isAndroid = Capacitor.getPlatform() === 'android';
+      // Absolute production web client key fallback to protect the web build against missing environment flags
+      const PRODUCTION_WEB_ID = '841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com';
 
-      // Safety check: Fallback strings used seamlessly across environments
-      const webId = import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID || '841907471689-a0eimqhk3pej66queq8c3ufkijgl5vin.apps.googleusercontent.com';
-      const androidId = import.meta.env.VITE_GOOGLE_ANDROID_CLIENT_ID || '841907471689-d526t0drebro2298hu5t1b4ur98h3q0p.apps.googleusercontent.com';
+      // 💡 IMPORTANT: Capawesome's native Android implementation AND the web implementation
+      // BOTH require the WEB Client ID for initializing the OAuth engine.
+      const finalClientId = import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID || PRODUCTION_WEB_ID;
 
-      // Route target parameter safely based on application container execution
-      const activeClientId = isAndroid ? webId : webId;
+      console.log(`Running initialization on [${currentPlatform}] using client ID:`, finalClientId);
 
-      // Initialize the plugin with the Google OAuth client ID
       await GoogleSignIn.initialize({
-        clientId: activeClientId,
+        clientId: finalClientId,
       });
 
-      // Attempt native sign-in
+      // Execute standard plugin sign-in handshake sequence
       const result = await GoogleSignIn.signIn();
 
       if (result?.idToken) {
@@ -179,19 +182,9 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         setGoogleAuthError(errMsg);
         toast.error(errMsg, { duration: 6000 });
       }
-    } catch (err: any) {
-      console.error("OAuth Execution Error:", JSON.stringify(err));
-      setGoogleAuthError(`Code: ${err.code} | Message: ${err.message} | Details: ${JSON.stringify(err)}`);
-
-      // Show the exact error code on-screen so you can debug on-device
-      toast.error(`Auth Error: ${err.code}`, {
-        duration: 10000,
-        style: {
-          maxWidth: "90vw",
-          fontSize: "12px",
-          wordBreak: "break-word",
-        },
-      });
+    } catch (error: any) {
+      console.error("Google Auth Exception:", JSON.stringify(error));
+      toast.error(`Sign-In Error: ${error.message || 'Verification Failed'}`);
 
       // ─── GRACEFUL WEB FALLBACK ───
       // If native plugin fails, try the web-based GSI popup as backup
@@ -409,6 +402,9 @@ const Login: React.FC<Props> = ({ onLogin }) => {
             />
           )}
         </motion.div>
+
+        {/* 📜 COMPLIANCE POLICY FOOTER */}
+        <ComplianceFooter />
 
         {/* SIGNUP LINK */}
         <motion.p
