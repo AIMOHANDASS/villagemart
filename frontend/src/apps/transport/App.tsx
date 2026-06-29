@@ -8,6 +8,8 @@ import DriverLogin from "./pages/DriverLogin";
 import DriverSignup from "./pages/DriverSignup";
 import { getStoredTransportUser } from "./api";
 import { parseQueryRouting, navigateToQueryPath } from "../../App";
+import PrivacyPolicy from "../../pages/PrivacyPolicy";
+import TermsOfService from "../../pages/TermsOfService";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const user = getStoredTransportUser();
@@ -33,6 +35,10 @@ export default function TransportApp() {
         return <DriverLogin />;
       case "signup":
         return <DriverSignup />;
+      case "privacy":
+        return <PrivacyPolicy />;
+      case "terms":
+        return <TermsOfService />;
       case "trips":
         return <ProtectedRoute><TransportLayout><Trips /></TransportLayout></ProtectedRoute>;
       case "earnings":

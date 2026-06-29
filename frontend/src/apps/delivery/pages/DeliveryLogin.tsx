@@ -4,6 +4,7 @@ import { Truck, Eye, EyeOff } from "lucide-react";
 import { loginUser } from "../api";
 import toast from "react-hot-toast";
 import { navigateToQueryPath } from "../../../App";
+import ComplianceFooter from "../../../components/ComplianceFooter";
 
 export default function DeliveryLogin() {
   const [email, setEmail] = useState("");
@@ -58,6 +59,9 @@ export default function DeliveryLogin() {
               className="w-full py-3.5 bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-xl hover:from-green-700 hover:to-green-800 transition-all shadow-lg shadow-green-200 disabled:opacity-60 text-base">
               {loading ? "Signing in..." : "Start Delivering 🚚"}
             </motion.button>
+            
+            {/* 📜 NEW: Google Play Compliance Footer */}
+            <ComplianceFooter />
             
             <p className="text-center text-sm text-gray-500 mt-4">
               Don't have an account? <button type="button" onClick={() => navigateToQueryPath("delivery", "signup")} className="text-green-600 font-semibold hover:underline">Sign up</button>

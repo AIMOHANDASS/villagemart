@@ -4,6 +4,7 @@ import { Car, Eye, EyeOff } from "lucide-react";
 import { loginUser } from "../api";
 import toast from "react-hot-toast";
 import { navigateToQueryPath } from "../../../App";
+import ComplianceFooter from "../../../components/ComplianceFooter";
 
 export default function DriverLogin() {
   const [email, setEmail] = useState("");
@@ -58,6 +59,10 @@ export default function DriverLogin() {
               className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold rounded-xl hover:from-amber-600 hover:to-orange-700 transition-all shadow-lg shadow-amber-200 disabled:opacity-60 text-base">
               {loading ? "Signing in..." : "Start Driving 🚖"}
             </motion.button>
+
+            {/* 📜 NEW: Google Play Compliance Footer */}
+            <ComplianceFooter />
+
             <p className="text-center text-sm text-gray-500 mt-4">
               Don't have an account? <button type="button" onClick={() => navigateToQueryPath("transport", "signup")} className="text-amber-600 font-semibold hover:underline">Sign up</button>
             </p>

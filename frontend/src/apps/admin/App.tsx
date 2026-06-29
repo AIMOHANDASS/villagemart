@@ -10,6 +10,8 @@ import PartnersPage from "./pages/PartnersPage";
 import Login from "./pages/Login";
 import { getStoredAdmin } from "./api";
 import { parseQueryRouting, navigateToQueryPath } from "../../App";
+import PrivacyPolicy from "../../pages/PrivacyPolicy";
+import TermsOfService from "../../pages/TermsOfService";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const admin = getStoredAdmin();
@@ -27,6 +29,10 @@ export default function AdminApp() {
     switch (subPath) {
       case "login":
         return <Login />;
+      case "privacy":
+        return <PrivacyPolicy />;
+      case "terms":
+        return <TermsOfService />;
       case "orders":
         return <ProtectedRoute><AdminLayout><Orders /></AdminLayout></ProtectedRoute>;
       case "products":

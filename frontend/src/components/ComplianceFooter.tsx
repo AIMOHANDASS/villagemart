@@ -10,7 +10,11 @@ const ComplianceFooter: React.FC = () => {
       animate={{ opacity: 1 }}
       transition={{ delay: 0.62 }}
     >
-      By continuing, you agree to our Terms of Service and acknowledge our{" "}
+      By continuing, you agree to our{" "}
+      <Link to="/terms" className="text-primary hover:underline font-medium">
+        Application Terms of Service
+      </Link>{" "}
+      and acknowledge our{" "}
       <Link to="/privacy" className="text-primary hover:underline font-medium">
         Privacy Policy
       </Link>.

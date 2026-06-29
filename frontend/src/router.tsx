@@ -13,6 +13,7 @@ import TestMap from "./pages/TestMap";
 import Transport from "./pages/Transport";
 import PartyHall from "./pages/PartyHall";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 
 /* ✅ NEW PAGES */
 import MyOrders from "./pages/MyOrders";
@@ -58,6 +59,7 @@ const AppRoutes: React.FC<Props> = ({ user, onLogin }) => {
       {/* ================= PUBLIC ROUTES ================= */}
       <Route path="/" element={<Home user={user} />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
       <Route
         path="/transport"
         element={

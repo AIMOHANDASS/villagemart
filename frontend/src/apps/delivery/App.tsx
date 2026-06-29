@@ -7,6 +7,8 @@ import DeliveryLogin from "./pages/DeliveryLogin";
 import DeliverySignup from "./pages/DeliverySignup";
 import { getStoredDeliveryUser } from "./api";
 import { parseQueryRouting, navigateToQueryPath } from "../../App";
+import PrivacyPolicy from "../../pages/PrivacyPolicy";
+import TermsOfService from "../../pages/TermsOfService";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const user = getStoredDeliveryUser();
@@ -32,6 +34,10 @@ export default function DeliveryApp() {
         return <DeliveryLogin />;
       case "signup":
         return <DeliverySignup />;
+      case "privacy":
+        return <PrivacyPolicy />;
+      case "terms":
+        return <TermsOfService />;
       case "orders":
         return <ProtectedRoute><DeliveryLayout><DeliveryHome /></DeliveryLayout></ProtectedRoute>;
       case "earnings":
