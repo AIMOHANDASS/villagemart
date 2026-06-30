@@ -74,9 +74,10 @@ export interface Product {
   s_price: number;
   GST: number;
   imageurl: string;
+  images?: string[];
   category: string;
-  product_type: "solid" | "liquid";
-  weight_volume_unit: string;
+  product_type: "solid" | "liquid" | "other";
+  weight_volume_unit?: string;
   inStock: number;
   outStock: number;
   isOrganic: boolean | number;

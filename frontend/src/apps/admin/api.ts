@@ -88,12 +88,18 @@ export const getAllProducts = async () => {
   return apiClient.get("/products");
 };
 
-export const createProduct = async (productData: any) => {
-  return apiClient.post("/products/add", productData);
+export const createProduct = async (productData: FormData | any) => {
+  const isFormData = productData instanceof FormData;
+  return apiClient.post("/products/add", productData, {
+    headers: isFormData ? { "Content-Type": "multipart/form-data" } : {},
+  });
 };
 
-export const updateProduct = async (productId: number, updateData: any) => {
-  return apiClient.put(`/products/${productId}`, updateData);
+export const updateProduct = async (productId: number, updateData: FormData | any) => {
+  const isFormData = updateData instanceof FormData;
+  return apiClient.put(`/products/${productId}`, updateData, {
+    headers: isFormData ? { "Content-Type": "multipart/form-data" } : {},
+  });
 };
 
 export const deleteProduct = async (productId: number) => {

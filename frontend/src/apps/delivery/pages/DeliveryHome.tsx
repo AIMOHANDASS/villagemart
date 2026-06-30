@@ -39,6 +39,7 @@ interface OrderItem {
   weight: number;
   total_price: number;
   image: string;
+  product_type?: string;
 }
 interface Order {
   orderId: number;
@@ -57,6 +58,15 @@ interface Order {
   customer_address?: string;
   payment_method?: string;
 }
+
+const getProductImageSrc = (url?: string) => {
+  if (!url) return "/assets/placeholder-product.png";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+    return url;
+  }
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanUrl}`;
+};
 
 const statusFlow = [
   "CONFIRMED",
@@ -979,10 +989,7 @@ export default function DeliveryHome() {
                           >
                             <div className="flex items-center gap-3">
                               <img
-                                src={
-                                  item.image ||
-                                  "/assets/placeholder-product.png"
-                                }
+                                src={getProductImageSrc(item.image)}
                                 alt={item.product_name}
                                 className="w-12 h-12 object-cover rounded-xl border border-stone-200/60 bg-stone-50"
                                 onError={(e) => {
@@ -992,12 +999,18 @@ export default function DeliveryHome() {
                               />
                               <div className="flex flex-col">
                                 <span className="font-bold text-stone-900 text-sm line-clamp-1">
-                                  {item.product_name} ({item.weight})
+                                  {item.product_name}
                                 </span>
                                 <span className="text-xs text-stone-500 font-medium">
                                   Qty:{" "}
                                   <span className="text-emerald-600 font-bold">
-                                    {Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}
+                                    {item.product_type === "solid"
+                                      ? `${item.weight} kg`
+                                      : item.product_type === "liquid"
+                                      ? `${item.weight} ltr`
+                                      : (item.weight && item.weight !== 1)
+                                      ? `${item.weight} units/kg`
+                                      : Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}
                                   </span>
                                 </span>
                               </div>
@@ -1012,7 +1025,11 @@ export default function DeliveryHome() {
                                 ).toFixed(2)}
                               </span>
                               <span className="text-[10px] font-semibold text-stone-400">
-                                (₹{Number(item.unit_price).toFixed(2)} / unit)
+                                {item.product_type === "solid"
+                                  ? `(₹${(Number(item.unit_price) / (Number(item.weight) || 1)).toFixed(2)} / kg)`
+                                  : item.product_type === "liquid"
+                                  ? `(₹${(Number(item.unit_price) / (Number(item.weight) || 1)).toFixed(2)} / ltr)`
+                                  : `(₹${Number(item.unit_price).toFixed(2)} / unit)`}
                               </span>
                             </div>
                           </div>

@@ -8,6 +8,7 @@ import {
   deleteProduct,
 } from "../controllers/product.controller";
 import { verifyToken, isAdmin } from "../middleware/auth.middleware";
+import { upload } from "../middleware/upload.middleware";
 
 const router = express.Router();
 
@@ -24,8 +25,8 @@ router.get("/:id", getProductById);
 // ──────────────────────────────────────────────────────
 // 🔐 PROTECTED WRITE ROUTES (Admin only)
 // ──────────────────────────────────────────────────────
-router.post("/add", verifyToken, createProduct);
-router.put("/:id", verifyToken, updateProduct);
+router.post("/add", verifyToken, upload.array("images", 6), createProduct);
+router.put("/:id", verifyToken, upload.array("images", 6), updateProduct);
 router.delete("/:id", verifyToken, deleteProduct);
 
 export default router;

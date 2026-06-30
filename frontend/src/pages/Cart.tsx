@@ -22,6 +22,7 @@ interface CartItem {
   calculatedUnitPrice?: number;
   originalPrice?: number;
   image: string;
+  images?: string[];
   category: string;
   product_type?: "solid" | "liquid" | "other";
   quantity: number;
@@ -39,6 +40,15 @@ type CartProps = {
 };
 
 const DRAFT_KEY = "vm_pending_booking";
+
+const getProductImageSrc = (url?: string) => {
+  if (!url) return "/placeholder.png";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+    return url;
+  }
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanUrl}`;
+};
 
 /* ================= SKELETON ================= */
 const CartSkeleton = () => (
@@ -312,9 +322,12 @@ const Cart: React.FC<CartProps> = ({ user }) => {
                         className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-2xl overflow-hidden shadow-sm"
                       >
                         <img
-                          src={item.image}
+                          src={getProductImageSrc(item.images?.[0] || item.image)}
                           alt={item.name}
                           className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "/placeholder.png";
+                          }}
                         />
                       </motion.div>
 

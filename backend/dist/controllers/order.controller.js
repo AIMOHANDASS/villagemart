@@ -131,6 +131,7 @@ const mapOrders = (rows) => {
                 weight: Number(row.weight),
                 total_price: Number(row.total_price),
                 image: row.image,
+                product_type: row.product_type || "other",
             });
         }
     });
@@ -160,6 +161,7 @@ const orderQuery = `
     oi.weight,
     oi.total_price,
     oi.image,
+    p.product_type,
 
     gs.garland_delivery_at,
     gs.garland_reminder_sent,
@@ -168,6 +170,7 @@ const orderQuery = `
   FROM orders o
   JOIN users u ON u.id = o.\`user id\`
   LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+  LEFT JOIN \`products\` p ON p.id = oi.product_id
   LEFT JOIN (
     SELECT
       \`order id\` AS order_id,
@@ -529,10 +532,12 @@ const getUserOrders = (req, res) => {
       oi.unit_price,
       oi.weight,
       oi.total_price,
-      oi.image
+      oi.image,
+      p.product_type
 
     FROM orders o
     LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+    LEFT JOIN \`products\` p ON p.id = oi.product_id
     WHERE o.\`user id\` = ?
     ORDER BY o.id DESC
   `;
@@ -567,6 +572,7 @@ const getUserOrders = (req, res) => {
                     weight: Number(row.weight),
                     total_price: Number(row.total_price),
                     image: row.image,
+                    product_type: row.product_type || "other",
                 });
             }
         });

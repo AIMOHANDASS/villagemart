@@ -60,6 +60,7 @@ app.use((0, cors_1.default)({
 app.use(express_1.default.json());
 // ✅ Serve uploaded partner documents (images, PDFs, etc.)
 app.use("/api/uploads", express_1.default.static(path_1.default.join(__dirname, "../uploads")));
+app.use("/uploads", express_1.default.static(path_1.default.join(__dirname, "../uploads")));
 // ============================
 // Database Connection Test
 // ============================

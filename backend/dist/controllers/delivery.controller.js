@@ -157,11 +157,13 @@ const getDeliveryOrders = (req, res) => {
       oi.unit_price,
       oi.weight,
       oi.total_price,
-      oi.image
+      oi.image,
+      p.product_type
 
     FROM orders o
     JOIN users u ON u.id = o.\`user id\`
     LEFT JOIN \`order_items\` oi ON oi.order_id = o.id
+    LEFT JOIN \`products\` p ON p.id = oi.product_id
     WHERE (o.delivery_status = 'PENDING_PICKUP' OR (o.delivery_partner_id = ? AND o.delivery_status != 'DELIVERED'))
       AND NOT EXISTS (
         SELECT 1 FROM \`order_items\` oi2 
@@ -213,6 +215,7 @@ const getDeliveryOrders = (req, res) => {
                     weight: Number(row.weight),
                     total_price: Number(row.total_price),
                     image: row.image,
+                    product_type: row.product_type || "other",
                 });
             }
         });
@@ -552,7 +555,8 @@ const getActiveDeliveryOrders = (req, res) => {
             'unit_price', COALESCE(oi.unit_price, 0.00),
             'weight', COALESCE(oi.weight, 0.00),
             'total_price', COALESCE(oi.total_price, 0.00),
-            'image', COALESCE(oi.image, '')
+            'image', COALESCE(oi.image, ''),
+            'product_type', COALESCE(p.product_type, 'other')
           )
         ) AS items,
         (
@@ -564,6 +568,7 @@ const getActiveDeliveryOrders = (req, res) => {
       FROM \`orders\` o
       JOIN \`users\` u ON o.\`user id\` = u.id
       LEFT JOIN \`order_items\` oi ON o.id = oi.order_id
+      LEFT JOIN \`products\` p ON oi.product_id = p.id
       WHERE (o.\`delivery_status\` != 'DELIVERED' OR o.\`delivery_status\` IS NULL)
         AND o.\`status\` != 'CANCELLED'
         AND NOT EXISTS (

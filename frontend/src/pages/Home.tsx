@@ -184,6 +184,7 @@ const Home: React.FC<HomeProps> = ({ user }) => {
           price: Number(row.s_price) || 0,
           originalPrice: Number(row.MRP) || undefined,
           image: row.imageurl || "",
+          images: row.images || (row.imageurl ? [row.imageurl] : []),
           category: row.category || "",
           product_type: row.product_type || "solid",
           rating: 4.5,

@@ -29,6 +29,15 @@ interface Order {
   items: OrderItem[];
 }
 
+const getProductImageSrc = (url?: string) => {
+  if (!url) return "/placeholder.png";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+    return url;
+  }
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanUrl}`;
+};
+
 const CANCEL_REASONS = ["Wrong product", "Wrong location"];
 
 /* ================= SKELETON ================= */
@@ -319,10 +328,10 @@ const MyOrders: React.FC<Props> = ({ user }) => {
                       <motion.img
                         key={idx}
                         whileHover={{ scale: 1.1 }}
-                        src={item.image || "https://via.placeholder.com/60"}
+                        src={getProductImageSrc(item.image)}
                         onError={(e) =>
                           ((e.target as HTMLImageElement).src =
-                            "https://via.placeholder.com/60")
+                            "/placeholder.png")
                         }
                         className="w-16 h-16 object-cover rounded-xl border-2 border-gray-100 dark:border-gray-700 shadow-sm"
                       />

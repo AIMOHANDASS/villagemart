@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { RefreshCw, Search, Filter } from "lucide-react";
-import { getAdminPanelData } from "../api";
+import { getAdminPanelData, API_BASE_URL } from "../api";
+
+const getProductImageSrc = (url?: string) => {
+  if (!url) return "/placeholder.png";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) {
+    return url;
+  }
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanUrl}`;
+};
 import { apiClient } from "../../../api/apiClient";
 import type { Order } from "../types";
 import toast from "react-hot-toast";
@@ -200,7 +209,7 @@ export default function Orders() {
                       <div className="space-y-1.5 min-w-[200px]">
                         {order.items?.map((item, idx) => (
                           <div key={idx} className="flex items-center gap-2">
-                            <img src={item.image || "https://via.placeholder.com/32"} alt={item.product_name} className="w-8 h-8 rounded-lg object-cover border border-gray-100" onError={(e) => { (e.target as HTMLImageElement).src = "https://via.placeholder.com/32"; }} />
+                             <img src={getProductImageSrc(item.image)} alt={item.product_name} className="w-8 h-8 rounded-lg object-cover border border-gray-100" onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.png"; }} />
                             <div>
                               <p className="text-sm font-medium text-gray-800 leading-tight">{item.product_name}</p>
                               <p className="text-[11px] text-gray-400">₹{item.unit_price} × {item.weight}kg</p>

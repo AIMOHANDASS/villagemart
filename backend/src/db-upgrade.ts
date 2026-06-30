@@ -112,6 +112,14 @@ export const upgradeDatabase = () => {
         if (!err) console.log("✅ Column 'product_type' widened to VARCHAR(50) in products");
     });
 
+    // 13.b ✅ NEW: Ensure products table has legacy 'imageurl' column if missing
+    db.query("ALTER TABLE products ADD COLUMN imageurl TEXT NULL", (err: any) => {
+        if (!err) console.log("✅ Column 'imageurl' ensured in products");
+        else if (err.code !== 'ER_DUP_FIELDNAME' && err.errno !== 1060) {
+            console.error("❌ Failed to add imageurl column to products:", err.message);
+        }
+    });
+
     // 14. ✅ NEW: Create system_settings table for global configuration flags (vehicle availability, etc.)
     db.query(`
         CREATE TABLE IF NOT EXISTS system_settings (
@@ -167,6 +175,25 @@ export const upgradeDatabase = () => {
     });
     db.query(`CREATE INDEX IF NOT EXISTS idx_delivery_commission ON delivery_partners (account_status, commission_deadline)`, (err) => {
         if (!err) console.log("✅ Index 'idx_delivery_commission' ensured");
+    });
+
+    // 18. ✅ NEW: product_images table for multi-image product mappings
+    db.query(`
+        CREATE TABLE IF NOT EXISTS product_images (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            product_id INT NOT NULL,
+            image_url VARCHAR(500) NOT NULL,
+            sort_order TINYINT DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_product_images_product_id (product_id),
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+        )
+    `, (err) => {
+        if (err) {
+            console.error("❌ Failed to create product_images table:", err.message);
+        } else {
+            console.log("✅ Table 'product_images' ensured");
+        }
     });
 };
 

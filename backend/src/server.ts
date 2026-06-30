@@ -68,6 +68,7 @@ app.use(express.json());
 
 // ✅ Serve uploaded partner documents (images, PDFs, etc.)
 app.use("/api/uploads", express.static(path.join(__dirname, "../uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // ============================
 // Database Connection Test
