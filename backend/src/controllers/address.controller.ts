@@ -111,3 +111,76 @@ export const addUserAddress = async (req: any, res: Response) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// Endpoint E: Set default/active address
+export const setDefaultAddress = async (req: any, res: Response) => {
+  const userId = req.user?.id;
+  const addressId = req.params.id;
+
+  try {
+    // 1. Mark all other user addresses as unselected
+    await db.promise().query("UPDATE user_addresses SET is_selected = 0 WHERE user_id = ?", [userId]);
+    
+    // 2. Mark the selected address as active/selected
+    const [result]: any = await db.promise().query(
+      "UPDATE user_addresses SET is_selected = 1 WHERE id = ? AND user_id = ?",
+      [addressId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Address not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "📍 Default address set successfully!" });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Endpoint F: Delete address
+export const deleteAddress = async (req: any, res: Response) => {
+  const userId = req.user?.id;
+  const addressId = req.params.id;
+
+  try {
+    // 1. Get all user addresses to check single address safeguard
+    const [addresses]: any = await db.promise().query(
+      "SELECT id, is_selected FROM user_addresses WHERE user_id = ? ORDER BY id DESC",
+      [userId]
+    );
+
+    if (addresses.length <= 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete the only saved address. At least one address is required for delivery."
+      });
+    }
+
+    // 2. Find the address to delete
+    const targetAddress = addresses.find((addr: any) => String(addr.id) === String(addressId));
+    if (!targetAddress) {
+      return res.status(404).json({ success: false, message: "Address not found" });
+    }
+
+    // 3. Fallback protection: If the deleted address is the currently active one, select a new one
+    if (targetAddress.is_selected === 1) {
+      const nextDefault = addresses.find((addr: any) => String(addr.id) !== String(addressId));
+      if (nextDefault) {
+        await db.promise().query(
+          "UPDATE user_addresses SET is_selected = 1 WHERE id = ?",
+          [nextDefault.id]
+        );
+      }
+    }
+
+    // 4. Delete the address
+    await db.promise().query(
+      "DELETE FROM user_addresses WHERE id = ? AND user_id = ?",
+      [addressId, userId]
+    );
+
+    return res.status(200).json({ success: true, message: "🗑️ Address deleted successfully!" });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};

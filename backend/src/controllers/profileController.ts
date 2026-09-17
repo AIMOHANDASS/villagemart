@@ -117,3 +117,49 @@ export const updateSettings = (req: Request, res: Response) => {
     }
   );
 };
+
+/* ======================================================
+   🔐 DIRECT PASSWORD UPDATE (No OTP required for verified sessions)
+====================================================== */
+export const updatePasswordDirect = async (req: Request, res: Response) => {
+  const authenticatedUserId = (req as any).user?.id;
+  const userRole = String((req as any).user?.role || "").toUpperCase();
+  const { email, newPassword } = req.body;
+
+  if (!authenticatedUserId) {
+    return res.status(401).json({ success: false, message: "Unauthorized: Access Denied." });
+  }
+
+  if (!email || !newPassword || newPassword.length < 8) {
+    return res.status(400).json({ success: false, message: "New password must be at least 8 characters long." });
+  }
+
+  const targetTable = (userRole === "TRANSPORT" || userRole === "RIDER" || userRole === "TRANSPORT_PARTNER") ? "transport_partners" : 
+                      (userRole === "DELIVERY" || userRole === "DELIVERY_PARTNER") ? "delivery_partners" : "users";
+
+  try {
+    const secureHashedPassword = await bcrypt.hash(newPassword, 12);
+    db.query(
+      `UPDATE ${targetTable} SET password = ? WHERE id = ? AND email = ?`,
+      [secureHashedPassword, authenticatedUserId, email.trim().toLowerCase()],
+      (updateErr, result: any) => {
+        if (updateErr) {
+          console.error("❌ Direct password update DB error:", updateErr.message);
+          return res.status(500).json({ success: false, message: "Database query execution error." });
+        }
+        
+        if (result && result.affectedRows === 0) {
+          return res.status(400).json({ success: false, message: "Email does not match your authenticated profile." });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Password has been updated successfully.",
+        });
+      }
+    );
+  } catch (error: any) {
+    console.error("❌ Direct password update catch error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to update password." });
+  }
+};

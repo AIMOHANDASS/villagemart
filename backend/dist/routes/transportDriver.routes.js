@@ -7,19 +7,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const transportDriver_controller_1 = require("../controllers/transportDriver.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const upload_middleware_1 = require("../middleware/upload.middleware");
 const router = express_1.default.Router();
-// 🔐 Auth routes
-router.post("/signup", upload_middleware_1.upload.fields([
-    { name: 'profile_image', maxCount: 1 },
-    { name: 'dl_document', maxCount: 1 },
-    { name: 'rc_document', maxCount: 1 },
-    { name: 'aadhaar_document', maxCount: 1 }
-]), transportDriver_controller_1.signupTransportPartner);
+router.post("/signup", transportDriver_controller_1.signupTransportPartner);
 router.post("/login", transportDriver_controller_1.loginTransportPartner);
 router.post("/toggle-online", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.toggleTransportOnline);
 // 🚗 Get available rides (filter via ?status=)
 router.get("/bookings", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.getDriverBookings);
+// 🚗 Get all trips assigned to this driver (active + history)
+router.get("/trips", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.getDriverTrips);
 // 🚗 Get active ride for this driver
 router.get("/my-active-ride", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.getMyActiveRide);
 // 🚗 Accept a ride (BOOKED -> CONFIRMED)
@@ -27,6 +22,8 @@ router.post("/accept/:rideId", auth_middleware_1.verifyToken, auth_middleware_1.
 // 🚗 Update ride status (CONFIRMED -> STARTED -> COMPLETED)
 router.put("/status/:rideId", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.updateRideStatus);
 router.post("/verify-otp", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.verifyRideOtp);
+// 💵 Mark cash collected
+router.post("/rides/:rideId/cash-collected", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.markCashCollected);
 // 📍 Update driver live GPS location
 router.post("/location", auth_middleware_1.verifyToken, auth_middleware_1.isTransport, transportDriver_controller_1.updateDriverLocation);
 // 💰 Transport Driver Earnings — ✅ FIXED: Uses checkRequiredRoles with broadened TRANSPORT + RIDER + DRIVER role array 🎯

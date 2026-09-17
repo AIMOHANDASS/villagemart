@@ -3,7 +3,6 @@ import { Request, Response } from "express";
 import db from "../db";
 import bcrypt from "bcryptjs";
 import { generateToken } from "../middleware/auth.middleware";
-
 /* ======================================================
    🗂 ENSURE ROLE COLUMN EXISTS ON USERS TABLE
    (safe ALTER — won't break if column already exists)
@@ -78,7 +77,7 @@ export const login = async (req: any, res: any) => {
       if (activeProfile.account_status === 'BLOCKED') {
         return res.status(403).json({ 
           success: false, 
-          message: "Access Denied: Your account is blocked due to an overdue commission payment balance. Please contact VillageMart Admin." 
+          message: "Access Denied: Your account is blocked due to an overdue commission payment balance. Please contact VillageSmart Admin." 
         });
       }
 
@@ -253,12 +252,34 @@ export const getMe = (req: any, res: Response) => {
       break;
     default:
       // CUSTOMER (default)
-      sql = `SELECT id, name, username, email, phone, address, latitude, longitude, role FROM users WHERE id = ? LIMIT 1`;
+      sql = `SELECT id, name, username, email, phone, address, latitude, longitude, role, profile_completed FROM users WHERE id = ? LIMIT 1`;
       responseRole = "CUSTOMER";
   }
 
   db.query(sql, [userId], (err: any, rows: any[]) => {
-    if (err || !rows?.length) {
+    if (err) {
+      console.warn("⚠️ getMe database query error, trying fallback query:", err.message);
+      const fallbackSql = `SELECT id, name, username, email, phone, address, latitude, longitude, role FROM users WHERE id = ? LIMIT 1`;
+      db.query(fallbackSql, [userId], (fallbackErr: any, fallbackRows: any[]) => {
+        if (fallbackErr || !fallbackRows?.length) {
+          return res.status(404).json({ success: false, message: "User not found" });
+        }
+        const userRecord = fallbackRows[0];
+        const profilePayload = {
+          ...userRecord,
+          role: responseRole,
+          phone: userRecord.phone ? String(userRecord.phone).trim() : "",
+          profileCompleted: false
+        };
+        return res.json({
+          success: true,
+          data: profilePayload
+        });
+      });
+      return;
+    }
+
+    if (!rows?.length) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
@@ -266,7 +287,8 @@ export const getMe = (req: any, res: Response) => {
     const profilePayload = {
       ...userRecord,
       role: responseRole,
-      phone: userRecord.phone ? String(userRecord.phone).trim() : ""
+      phone: userRecord.phone ? String(userRecord.phone).trim() : "",
+      profileCompleted: userRecord.profile_completed === 1
     };
 
     return res.json({
@@ -274,4 +296,645 @@ export const getMe = (req: any, res: Response) => {
       data: profilePayload
     });
   });
+};
+
+/* ======================================================
+   🔐 PHONE OTP AUTH / LOGIN (Firebase Verified Phone Number)
+   POST /api/auth/phone
+   Body: { phone }
+====================================================== */
+export const phoneAuth = async (req: Request, res: Response) => {
+  const { phone } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ success: false, message: "Phone number is required" });
+  }
+
+  // Normalize phone number to standard 10-digit format
+  let cleanPhone = String(phone).trim();
+  let tenDigitPhone = cleanPhone.replace(/^\+91|^91|\s+/g, '');
+  if (tenDigitPhone.length !== 10 || !/^\d{10}$/.test(tenDigitPhone)) {
+    return res.status(400).json({ success: false, message: "Invalid 10-digit phone number" });
+  }
+
+  try {
+    // Query local DB users by phone number variants
+    db.query(
+      "SELECT * FROM users WHERE phone = ? OR phone = ? OR phone LIKE ? LIMIT 1",
+      [cleanPhone, tenDigitPhone, `%${tenDigitPhone}`],
+      async (err, rows: any[]) => {
+        if (err) {
+          console.error("❌ Phone login DB error:", err);
+          return res.status(500).json({ success: false, message: "Database verification error" });
+        }
+
+        // Case 1: USER EXISTS -> Log them in directly
+        if (rows && rows.length > 0) {
+          const user = rows[0];
+
+          if (user.account_status === "BLOCKED") {
+            return res.status(403).json({
+              success: false,
+              message: "Access Denied: Your account is blocked due to an overdue commission payment balance. Please contact VillageSmart Admin."
+            });
+          }
+
+          delete user.password;
+          const role = (user.role || "CUSTOMER").toUpperCase();
+          const token = generateToken({ id: user.id, username: user.username, role });
+
+          return res.json({
+            success: true,
+            message: "Mobile OTP Login successful",
+            token,
+            role,
+            user_id: user.id,
+            user: {
+              id: user.id,
+              name: user.name,
+              username: user.username,
+              email: user.email || "",
+              phone: user.phone ? String(user.phone).trim() : "",
+              address: user.address || "",
+              role
+            }
+          });
+        }
+
+        // Case 2: NEW USER -> Auto-signup
+        // 🎯 FIX: Generate unique placeholder email to avoid UNIQUE KEY collision on users.email
+        const randomSuffix = Math.floor(Math.random() * 100000);
+        const username = `user_${tenDigitPhone}_${randomSuffix}`;
+        const placeholderEmail = `phone_${tenDigitPhone}_${randomSuffix}@placeholder.villagemart.local`;
+        const defaultName = 'VillageSmart User';
+        
+        const insertSql = `
+          INSERT INTO users
+          (name, username, email, phone, password, address, latitude, longitude, role, \`dark mode\`, is_private, hide_phone, \`hide address\`, pincode)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 0, 0, 0, 0, '')
+        `;
+
+        db.query(
+          insertSql,
+          [
+            defaultName,
+            username,
+            placeholderEmail,
+            tenDigitPhone,
+            "FIREBASE_PHONE_AUTH", // placeholder password
+            "", // address
+            null,
+            null
+          ],
+          (insertErr: any, result: any) => {
+            if (insertErr) {
+              console.error("❌ Phone signup DB insert error [phoneAuth]:");
+              console.error("   SQL Error Code:", insertErr.code);
+              console.error("   SQL Errno:", insertErr.errno);
+              console.error("   SQL Message:", insertErr.sqlMessage);
+              console.error("   Full Error:", insertErr);
+
+              // 🛡️ Race condition guard: if ER_DUP_ENTRY, the user may have been created
+              // between our SELECT and INSERT — re-fetch and log them in
+              if (insertErr.code === 'ER_DUP_ENTRY') {
+                db.query(
+                  "SELECT * FROM users WHERE phone = ? OR phone LIKE ? LIMIT 1",
+                  [tenDigitPhone, `%${tenDigitPhone}`],
+                  (retryErr, retryRows: any[]) => {
+                    if (!retryErr && retryRows && retryRows.length > 0) {
+                      const existingUser = retryRows[0];
+                      delete existingUser.password;
+                      const role = (existingUser.role || "CUSTOMER").toUpperCase();
+                      const token = generateToken({ id: existingUser.id, username: existingUser.username, role });
+                      return res.json({
+                        success: true,
+                        message: "Mobile OTP Login successful (recovered)",
+                        token, role, user_id: existingUser.id,
+                        user: {
+                          id: existingUser.id, name: existingUser.name,
+                          username: existingUser.username, email: existingUser.email || "",
+                          phone: existingUser.phone ? String(existingUser.phone).trim() : "",
+                          address: existingUser.address || "", role
+                        }
+                      });
+                    }
+                    return res.status(500).json({ success: false, message: "Signup failed: duplicate entry detected but recovery failed" });
+                  }
+                );
+                return;
+              }
+
+              return res.status(500).json({
+                success: false,
+                message: "Signup database insertion failed",
+                error: insertErr.sqlMessage || insertErr.message
+              });
+            }
+
+            const newUserId = result.insertId;
+            const token = generateToken({ id: newUserId, username, role: "CUSTOMER" });
+
+            return res.status(201).json({
+              success: true,
+              message: "Mobile OTP Registration successful",
+              token,
+              role: "CUSTOMER",
+              user_id: newUserId,
+              user: {
+                id: newUserId,
+                name: defaultName,
+                username,
+                email: "",
+                phone: tenDigitPhone,
+                address: "",
+                role: "CUSTOMER"
+              }
+            });
+          }
+        );
+      }
+    );
+  } catch (error) {
+    console.error("❌ High-level phone authentication endpoint crash:", error);
+    return res.status(500).json({ success: false, message: "Internal server authentication failure" });
+  }
+};
+
+/* ======================================================
+   🔐 GOOGLE LOGIN (Firebase Auth verification bypass exchange)
+   POST /api/auth/google-login
+   Body: { email, name }
+====================================================== */
+export const googleLogin = async (req: Request, res: Response) => {
+  const { email, name } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ success: false, message: "Email is required" });
+  }
+
+  try {
+    // Check if user exists by email
+    db.query("SELECT * FROM users WHERE email = ? LIMIT 1", [email], async (err, rows: any[]) => {
+      if (err) {
+        console.error("❌ Google login query error:", err);
+        return res.status(500).json({ success: false, message: "Database verification error" });
+      }
+
+      const checkCompletenessAndRespond = (user: any) => {
+        // googleLogin check: phone or pincode missing
+        const isPhoneMissing = !user.phone || String(user.phone).trim() === "" || String(user.phone).trim() === "0000000000";
+        const isPincodeMissing = !user.pincode || String(user.pincode).trim() === "";
+        const isProfileComplete = user.profile_completed === 1 || (!isPhoneMissing && !isPincodeMissing);
+
+        const role = (user.role || "CUSTOMER").toUpperCase();
+        const token = generateToken({ id: user.id, username: user.username, role });
+
+        return res.json({
+          success: true,
+          profileComplete: isProfileComplete,
+          token,
+          role,
+          user_id: user.id,
+          user: {
+            id: user.id,
+            name: user.name,
+            username: user.username,
+            email: user.email || "",
+            phone: user.phone ? String(user.phone).trim() : "",
+            address: user.address || "",
+            pincode: user.pincode || "",
+            latitude: user.latitude,
+            longitude: user.longitude,
+            role,
+            profileCompleted: user.profile_completed === 1
+          }
+        });
+      };
+
+      if (rows && rows.length > 0) {
+        return checkCompletenessAndRespond(rows[0]);
+      }
+
+      // User doesn't exist, create a new one with default metadata
+      // 🎯 FIX: Wider random range to reduce username collision risk
+      const username = email.split("@")[0] + "_" + Math.floor(Math.random() * 100000);
+      const insertSql = `
+        INSERT INTO users
+        (name, username, email, phone, password, address, latitude, longitude, role, \`dark mode\`, is_private, hide_phone, \`hide address\`, pincode)
+        VALUES (?, ?, ?, '', 'GOOGLE_AUTH', '', null, null, 'CUSTOMER', 0, 0, 0, 0, '')
+      `;
+
+      db.query(insertSql, [name || "Google User", username, email], (insertErr: any, result: any) => {
+        if (insertErr) {
+          // 🎯 FIX: Full diagnostic error logging instead of swallowing the SQL error
+          console.error("❌ Google login insert error [googleLogin]:");
+          console.error("   SQL Error Code:", insertErr.code);
+          console.error("   SQL Errno:", insertErr.errno);
+          console.error("   SQL Message:", insertErr.sqlMessage);
+          console.error("   Full Error:", insertErr);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to create user record",
+            error: insertErr.sqlMessage || insertErr.message
+          });
+        }
+
+        const newUserId = result.insertId;
+        db.query("SELECT * FROM users WHERE id = ? LIMIT 1", [newUserId], (selectErr, newRows: any[]) => {
+          if (selectErr || !newRows || newRows.length === 0) {
+            return res.status(500).json({ success: false, message: "Failed to retrieve newly created profile" });
+          }
+          return checkCompletenessAndRespond(newRows[0]);
+        });
+      });
+    });
+  } catch (error) {
+    console.error("❌ Google login controller crash:", error);
+    return res.status(500).json({ success: false, message: "Internal server authentication failure" });
+  }
+};
+
+/* ======================================================
+   🔐 PHONE OTP LOGIN (Firebase Verified Phone Number)
+   POST /api/auth/phone-login
+   Body: { phone }
+====================================================== */
+export const phoneLogin = async (req: Request, res: Response) => {
+  const { phone } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ success: false, message: "Phone number is required" });
+  }
+
+  // Normalize phone number to standard 10-digit format
+  let cleanPhone = String(phone).trim();
+  let tenDigitPhone = cleanPhone.replace(/^\+91|^91|\s+/g, '');
+  if (tenDigitPhone.length !== 10 || !/^\d{10}$/.test(tenDigitPhone)) {
+    return res.status(400).json({ success: false, message: "Invalid 10-digit phone number" });
+  }
+
+  try {
+    // Check if user exists by phone
+    db.query(
+      "SELECT * FROM users WHERE phone = ? OR phone = ? OR phone LIKE ? LIMIT 1",
+      [cleanPhone, tenDigitPhone, `%${tenDigitPhone}`],
+      async (err, rows: any[]) => {
+        if (err) {
+          console.error("❌ Phone login query error:", err);
+          return res.status(500).json({ success: false, message: "Database verification error" });
+        }
+
+        const checkCompletenessAndRespond = (user: any) => {
+          // phoneLogin check: email or pincode missing
+          // 🎯 FIX: Treat placeholder emails as "missing" for profile completeness
+          const rawEmail = String(user.email || "").trim();
+          const isEmailMissing = !rawEmail || rawEmail.endsWith("@placeholder.villagemart.local");
+          const isPincodeMissing = !user.pincode || String(user.pincode).trim() === "";
+          const isProfileComplete = user.profile_completed === 1 || (!isEmailMissing && !isPincodeMissing);
+
+          const role = (user.role || "CUSTOMER").toUpperCase();
+          const token = generateToken({ id: user.id, username: user.username, role });
+
+          // Return clean email to frontend (hide placeholder from UI)
+          const displayEmail = rawEmail.endsWith("@placeholder.villagemart.local") ? "" : rawEmail;
+
+          return res.json({
+            success: true,
+            profileComplete: isProfileComplete,
+            token,
+            role,
+            user_id: user.id,
+            user: {
+              id: user.id,
+              name: user.name,
+              username: user.username,
+              email: displayEmail,
+              phone: user.phone ? String(user.phone).trim() : "",
+              address: user.address || "",
+              pincode: user.pincode || "",
+              latitude: user.latitude,
+              longitude: user.longitude,
+              role,
+              profileCompleted: user.profile_completed === 1
+            }
+          });
+        };
+
+        if (rows && rows.length > 0) {
+          const user = rows[0];
+          if (user.account_status === "BLOCKED") {
+            return res.status(403).json({
+              success: false,
+              message: "Access Denied: Your account is blocked due to an overdue commission payment balance."
+            });
+          }
+          return checkCompletenessAndRespond(user);
+        }
+
+        // User doesn't exist, create a new user saving ONLY phone number and defaults
+        // 🎯 FIX: Generate unique placeholder email to avoid UNIQUE KEY collision on users.email
+        const randomSuffix = Math.floor(Math.random() * 100000);
+        const username = `user_${tenDigitPhone}_${randomSuffix}`;
+        const placeholderEmail = `phone_${tenDigitPhone}_${randomSuffix}@placeholder.villagemart.local`;
+        const defaultName = 'VillageSmart User';
+
+        const insertSql = `
+          INSERT INTO users
+          (name, username, email, phone, password, address, latitude, longitude, role, \`dark mode\`, is_private, hide_phone, \`hide address\`, pincode)
+          VALUES (?, ?, ?, ?, 'FIREBASE_PHONE_AUTH', '', null, null, 'CUSTOMER', 0, 0, 0, 0, '')
+        `;
+
+        db.query(insertSql, [defaultName, username, placeholderEmail, tenDigitPhone], (insertErr: any, result: any) => {
+          if (insertErr) {
+            // 🎯 FIX: Full diagnostic error logging instead of swallowing the SQL error
+            console.error("❌ Phone signup insert error [phoneLogin]:");
+            console.error("   SQL Error Code:", insertErr.code);
+            console.error("   SQL Errno:", insertErr.errno);
+            console.error("   SQL Message:", insertErr.sqlMessage);
+            console.error("   Full Error:", insertErr);
+
+            // 🛡️ Race condition guard: if ER_DUP_ENTRY, the user may have been created
+            // between our SELECT and INSERT — re-fetch and log them in
+            if (insertErr.code === 'ER_DUP_ENTRY') {
+              db.query(
+                "SELECT * FROM users WHERE phone = ? OR phone LIKE ? LIMIT 1",
+                [tenDigitPhone, `%${tenDigitPhone}`],
+                (retryErr, retryRows: any[]) => {
+                  if (!retryErr && retryRows && retryRows.length > 0) {
+                    return checkCompletenessAndRespond(retryRows[0]);
+                  }
+                  return res.status(500).json({ success: false, message: "Signup failed: duplicate entry detected but recovery failed" });
+                }
+              );
+              return;
+            }
+
+            return res.status(500).json({
+              success: false,
+              message: "Failed to create user record",
+              error: insertErr.sqlMessage || insertErr.message
+            });
+          }
+
+          const newUserId = result.insertId;
+          db.query("SELECT * FROM users WHERE id = ? LIMIT 1", [newUserId], (selectErr, newRows: any[]) => {
+            if (selectErr || !newRows || newRows.length === 0) {
+              return res.status(500).json({ success: false, message: "Failed to retrieve newly created profile" });
+            }
+            return checkCompletenessAndRespond(newRows[0]);
+          });
+        });
+      }
+    );
+  } catch (error) {
+    console.error("❌ Phone login controller crash:", error);
+    return res.status(500).json({ success: false, message: "Internal server authentication failure" });
+  }
+};
+
+/* ======================================================
+   🔐 PASSWORD LOGIN (Username / Email / Phone + Password)
+   POST /api/auth/password-login
+   Body: { usernameOrEmail, password }
+====================================================== */
+export const passwordLogin = async (req: Request, res: Response) => {
+  const { usernameOrEmail, password } = req.body;
+
+  if (!usernameOrEmail || !password) {
+    return res.status(400).json({ success: false, message: "Missing login parameters" });
+  }
+
+  try {
+    const sql = "SELECT * FROM users WHERE username = ? OR email = ? OR phone = ? LIMIT 1";
+    db.query(sql, [usernameOrEmail, usernameOrEmail, usernameOrEmail], async (err, results: any[]) => {
+      if (err || !results || results.length === 0) {
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+      }
+
+      const user = results[0];
+
+      if (user.account_status === "BLOCKED") {
+        return res.status(403).json({
+          success: false,
+          message: "Access Denied: Your account is blocked due to an overdue commission payment balance."
+        });
+      }
+
+      // Verify bcrypt password
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+      }
+
+      // Check completeness
+      const isEmailMissing = !user.email || String(user.email).trim() === "";
+      const isPhoneMissing = !user.phone || String(user.phone).trim() === "" || String(user.phone).trim() === "0000000000";
+      const isPincodeMissing = !user.pincode || String(user.pincode).trim() === "";
+      const isProfileComplete = !isEmailMissing && !isPhoneMissing && !isPincodeMissing;
+
+      const role = (user.role || "CUSTOMER").toUpperCase();
+      const token = generateToken({ id: user.id, username: user.username, role });
+
+      delete user.password;
+
+      return res.json({
+        success: true,
+        token,
+        profileComplete: isProfileComplete,
+        role,
+        user_id: user.id,
+        user: {
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          email: user.email || "",
+          phone: user.phone ? String(user.phone).trim() : "",
+          address: user.address || "",
+          pincode: user.pincode || "",
+          latitude: user.latitude,
+          longitude: user.longitude,
+          role
+        }
+      });
+    });
+  } catch (error) {
+    console.error("❌ Password login controller crash:", error);
+    return res.status(500).json({ success: false, message: "Internal server authentication failure" });
+  }
+};
+
+/* ======================================================
+   ✏️ UPDATE PROFILE (PUT /api/auth/update-profile)
+   Protected session handler
+====================================================== */
+export const updateProfile = async (req: any, res: Response) => {
+  const userId = req.user?.id;
+  
+  if (!userId) {
+    return res.status(401).json({ success: false, message: "Access Denied: Unauthenticated session" });
+  }
+
+  const { name, email, phone, address, pincode, latitude, longitude } = req.body;
+
+  try {
+    db.query("SELECT * FROM users WHERE id = ? LIMIT 1", [userId], (selectErr, rows: any[]) => {
+      if (selectErr || !rows || rows.length === 0) {
+        return res.status(404).json({ success: false, message: "User profile not found" });
+      }
+
+      const existingUser = rows[0];
+
+      // Merge values cleanly
+      const updatedName = name !== undefined ? name : existingUser.name;
+      const updatedEmail = email !== undefined ? email : existingUser.email;
+      const updatedPhone = phone !== undefined ? phone : existingUser.phone;
+      const updatedAddress = address !== undefined ? address : existingUser.address;
+      const updatedPincode = pincode !== undefined ? pincode : existingUser.pincode;
+      const updatedLatitude = latitude !== undefined ? latitude : existingUser.latitude;
+      const updatedLongitude = longitude !== undefined ? longitude : existingUser.longitude;
+
+      // Check for conflicting unique email/phone in another user record
+      const emailToCheck = email !== undefined ? String(email).trim().toLowerCase() : "";
+      const isEmailPlaceholder = emailToCheck.endsWith("@placeholder.villagemart.local");
+      const existingEmailVal = String(existingUser.email || "").trim().toLowerCase();
+
+      const proceedWithPhoneCheck = () => {
+        const phoneToCheck = String(updatedPhone || "").trim();
+        const tenDigitPhone = phoneToCheck.replace(/^\+91|^91|\s+/g, '');
+        const existingPhoneVal = String(existingUser.phone || "").trim().replace(/^\+91|^91|\s+/g, '');
+
+        // If the number matches the existing user's phone number, skip the duplicate check
+        if (phoneToCheck && phoneToCheck !== "0000000000" && tenDigitPhone !== existingPhoneVal && phoneToCheck !== existingUser.phone) {
+          db.query(
+            "SELECT id FROM users WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND id != ? LIMIT 1",
+            [phoneToCheck, tenDigitPhone, `%${tenDigitPhone}`, userId],
+            (phoneCheckErr, phoneRows: any[]) => {
+              if (phoneCheckErr) {
+                console.error("❌ Phone conflict query check failed:", phoneCheckErr);
+                return res.status(500).json({ success: false, message: "Conflict verification check failed" });
+              }
+              if (phoneRows && phoneRows.length > 0) {
+                return res.status(400).json({
+                  success: false,
+                  message: "This phone number is already associated with another account."
+                });
+              }
+              performProfileUpdate();
+            }
+          );
+        } else {
+          performProfileUpdate();
+        }
+      };
+
+      const performProfileUpdate = () => {
+        // Check if profile is complete (meaning name, email, phone, address, pincode are set)
+        const isEmailValid = updatedEmail && String(updatedEmail).trim() !== "" && !String(updatedEmail).endsWith("@placeholder.villagemart.local");
+        const isPhoneValid = updatedPhone && String(updatedPhone).trim() !== "" && String(updatedPhone).trim() !== "0000000000";
+        const isAddressValid = updatedAddress && String(updatedAddress).trim() !== "";
+        const isPincodeValid = updatedPincode && String(updatedPincode).trim() !== "";
+
+        const profileCompletedVal = (isEmailValid && isPhoneValid && isAddressValid && isPincodeValid) ? 1 : 0;
+
+        const updateSql = `
+          UPDATE users
+          SET name = ?, email = ?, phone = ?, address = ?, pincode = ?, latitude = ?, longitude = ?, profile_completed = ?
+          WHERE id = ?
+        `;
+
+        const fallbackUpdateSql = `
+          UPDATE users
+          SET name = ?, email = ?, phone = ?, address = ?, pincode = ?, latitude = ?, longitude = ?
+          WHERE id = ?
+        `;
+
+        const sendResponse = () => {
+          db.query("SELECT * FROM users WHERE id = ? LIMIT 1", [userId], (fetchErr, updatedRows: any[]) => {
+            if (fetchErr || !updatedRows || updatedRows.length === 0) {
+              return res.status(500).json({ success: false, message: "Failed to retrieve updated profile" });
+            }
+
+            const user = updatedRows[0];
+            delete user.password;
+            const role = (user.role || "CUSTOMER").toUpperCase();
+
+            return res.json({
+              success: true,
+              message: "Profile updated successfully",
+              user: {
+                id: user.id,
+                name: user.name,
+                username: user.username,
+                email: user.email || "",
+                phone: user.phone ? String(user.phone).trim() : "",
+                address: user.address || "",
+                pincode: user.pincode || "",
+                latitude: user.latitude,
+                longitude: user.longitude,
+                role,
+                profileCompleted: user.profile_completed !== undefined ? user.profile_completed === 1 : false
+              }
+            });
+          });
+        };
+
+        db.query(
+          updateSql,
+          [updatedName, updatedEmail, updatedPhone, updatedAddress, updatedPincode, updatedLatitude, updatedLongitude, profileCompletedVal, userId],
+          (updateErr) => {
+            if (updateErr) {
+              console.warn("⚠️ Failed to update with profile_completed, running fallback update query:", updateErr.message);
+              db.query(
+                fallbackUpdateSql,
+                [updatedName, updatedEmail, updatedPhone, updatedAddress, updatedPincode, updatedLatitude, updatedLongitude, userId],
+                (fallbackErr) => {
+                  if (fallbackErr) {
+                    console.error("❌ Fallback update profile DB error:", fallbackErr);
+                    return res.status(500).json({ success: false, message: "Profile update transaction failed" });
+                  }
+                  sendResponse();
+                }
+              );
+              return;
+            }
+            sendResponse();
+          }
+        );
+      };
+
+      if (emailToCheck && !isEmailPlaceholder && emailToCheck !== existingEmailVal) {
+        db.query(
+          "SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1",
+          [emailToCheck, userId],
+          (emailCheckErr, emailRows: any[]) => {
+            if (emailCheckErr) {
+              console.error("❌ Email conflict query check failed:", emailCheckErr);
+              return res.status(500).json({ success: false, message: "Conflict verification check failed" });
+            }
+            if (emailRows && emailRows.length > 0) {
+              return res.status(400).json({
+                success: false,
+                message: "This email address is already in use by another account."
+              });
+            }
+            proceedWithPhoneCheck();
+          }
+        );
+      } else {
+        proceedWithPhoneCheck();
+      }
+    });
+  } catch (error) {
+    console.error("❌ Profile update crash:", error);
+    return res.status(500).json({ success: false, message: "Internal server profile update failure" });
+  }
+};
+
+
+/* ======================================================
+   ✏️ COMPLETE PROFILE FIELDS (PUT /api/auth/complete-profile-fields)
+   Protected session handler
+====================================================== */
+export const completeProfileFields = async (req: any, res: Response) => {
+  return updateProfile(req, res);
 };

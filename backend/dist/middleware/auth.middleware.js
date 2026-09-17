@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkPartnerSessionStatus = exports.isAdminOrTransport = exports.isAdminOrDelivery = exports.isCustomer = exports.isTransport = exports.isDelivery = exports.isAdmin = exports.requireRole = exports.checkRequiredRoles = exports.verifyToken = exports.generateToken = void 0;
+exports.checkPartnerSessionStatus = exports.isAdminOrTransport = exports.isAdminOrDelivery = exports.isCustomer = exports.isTransport = exports.isDelivery = exports.isAdmin = exports.requireRole = exports.checkRequiredRoles = exports.checkAdminPermission = exports.verifyToken = exports.generateToken = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const db_1 = __importDefault(require("../db"));
 const JWT_SECRET = process.env.JWT_SECRET || "VILLAGEMART_SUPER_SECURE_PERMANENT_LOCAL_SECRET_KEY_2026";
@@ -28,15 +28,49 @@ const verifyToken = (req, res, next) => {
     jsonwebtoken_1.default.verify(token, REUSABLE_DEV_SECRET, (err, decoded) => {
         if (err) {
             console.error("❌ JWT Verification failed payload error:", err.message);
+            if (err.name === 'TokenExpiredError') {
+                return res.status(401).json({ success: false, message: "Your session has expired. Please login again." });
+            }
             return res.status(401).json({ success: false, message: "Invalid or expired token payload" });
         }
         // Mount the authenticated parameters securely onto the Express request channel
-        req.user = { id: decoded.id, role: String(decoded.role).toUpperCase() };
+        req.user = {
+            id: decoded.id,
+            username: decoded.username || "",
+            role: String(decoded.role).toUpperCase(),
+            permissions: decoded.permissions || []
+        };
         // 🛡️ DYNAMIC BLOCK CHECK: Automatically terminate session if the partner was blocked
         (0, exports.checkPartnerSessionStatus)(req, res, next);
     });
 };
 exports.verifyToken = verifyToken;
+/* ======================================================
+   🛡️ ADMIN ACCESS CONTROL GATES (RBAC)
+====================================================== */
+const checkAdminPermission = (moduleName) => {
+    return (req, res, next) => {
+        if (!req.user) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        if (req.user.role !== "ADMIN") {
+            return res.status(403).json({ success: false, message: "Access Denied: Admin role required" });
+        }
+        // Super Admin (ID 1, or ID 0, or username Mohan) bypasses permissions checks
+        if (req.user.id === 1 || req.user.id === 0 || req.user.username === "Mohan") {
+            return next();
+        }
+        const perms = req.user.permissions || [];
+        if (perms.includes(moduleName)) {
+            return next();
+        }
+        return res.status(403).json({
+            success: false,
+            message: `Access Denied: You do not have permission to view ${moduleName.charAt(0).toUpperCase() + moduleName.slice(1)}.`
+        });
+    };
+};
+exports.checkAdminPermission = checkAdminPermission;
 /* ======================================================
    🛡️ DYNAMIC MULTI-ROLE AUTHENTICATION SHIELD
    

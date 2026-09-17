@@ -3,26 +3,70 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markSingleNotificationRead = exports.markNotificationsRead = exports.getUserNotifications = void 0;
+exports.sendCustomPush = exports.unregisterToken = exports.registerToken = exports.markSingleNotificationRead = exports.markNotificationsRead = exports.getUserNotifications = exports.getUnreadCount = void 0;
 const db_1 = __importDefault(require("../db"));
+const notification_utils_1 = require("../utils/notification.utils");
+/* ======================================================
+   🗂 ENSURE FCM_TOKEN COLUMN EXISTS
+====================================================== */
+const tables = ['users', 'admins', 'delivery_partners', 'transport_partners'];
+tables.forEach(table => {
+    db_1.default.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(255) NULL`, (err) => {
+        if (err && !String(err.message).includes("Duplicate")) {
+            // Fallback for MySQL versions without IF NOT EXISTS on ALTER
+            db_1.default.query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='${table}' AND COLUMN_NAME='fcm_token'`, (checkErr, rows) => {
+                if (!checkErr && (!rows || rows.length === 0)) {
+                    db_1.default.query(`ALTER TABLE ${table} ADD COLUMN fcm_token VARCHAR(255) NULL`, (addErr) => {
+                        if (!addErr)
+                            console.log(`✅ Added 'fcm_token' column to ${table} table`);
+                    });
+                }
+            });
+        }
+    });
+});
+/* ======================================================
+   🔔 GET UNREAD NOTIFICATIONS COUNT
+   GET /api/notifications/unread-count
+====================================================== */
+const getUnreadCount = (req, res) => {
+    const userId = req.user?.id;
+    if (!userId)
+        return res.status(200).json({ count: 0 });
+    const sql = "SELECT COUNT(*) as count FROM notifications WHERE `user id` = ? AND `is read` = 0";
+    db_1.default.query(sql, [userId], (err, results) => {
+        if (err) {
+            console.error("❌ Database query failure fetching unread count:", err);
+            return res.status(200).json({ count: 0 });
+        }
+        const count = results?.[0]?.count || 0;
+        return res.status(200).json({ success: true, count });
+    });
+};
+exports.getUnreadCount = getUnreadCount;
 /* ======================================================
    🔔 GET USER NOTIFICATIONS
+   GET /api/notifications or GET /api/notifications/:userId
 ====================================================== */
 const getUserNotifications = (req, res) => {
     let userId;
+    // 1. Extract dynamic user ID from request parameters or JWT auth session payload
     if (req.params.userId) {
         userId = Number(req.params.userId);
     }
     else if (req.user) {
         userId = Number(req.user.id);
     }
-    if (!userId || isNaN(userId) || String(userId) === '1') {
+    // Safe fallback validation for missing or invalid user ID parameters
+    if (userId === undefined || isNaN(userId)) {
         return res.status(200).json([]);
     }
-    const sql = 'SELECT `id`, `user id` AS userId, `message`, `is read` AS isRead, `created_at` AS createdAt FROM notifications WHERE `user id` = ? ORDER BY `created_at` DESC';
+    // 2. Execute parameterized query matching the target user explicitly (no hardcoded ID gatekeepers)
+    const sql = "SELECT `id`, `user id` AS userId, `message`, `is read` AS isRead, `created_at` AS createdAt FROM notifications WHERE `user id` = ? ORDER BY `created_at` DESC";
     db_1.default.query(sql, [userId], (err, results) => {
         if (err) {
-            console.error("❌ Local database notification fetch failure:", err);
+            console.error("❌ Database query failure fetching user notifications:", err);
+            // 3. Fall back to safe empty array so map/list rendering doesn't crash
             return res.status(200).json([]);
         }
         const standardizedOutput = Array.isArray(results) ? results : [];
@@ -32,6 +76,7 @@ const getUserNotifications = (req, res) => {
 exports.getUserNotifications = getUserNotifications;
 /* ======================================================
    ✅ MARK ALL USER NOTIFICATIONS AS READ
+   POST /api/notifications/read or POST /api/notifications/read/:userId
 ====================================================== */
 const markNotificationsRead = (req, res) => {
     let userId;
@@ -39,36 +84,135 @@ const markNotificationsRead = (req, res) => {
         userId = Number(req.params.userId);
     }
     else if (req.user) {
-        userId = req.user.id;
+        userId = Number(req.user.id);
     }
-    if (!userId) {
-        return res.status(400).json({ message: "Invalid userId" });
+    if (userId === undefined || isNaN(userId)) {
+        return res.status(400).json({ success: false, message: "Invalid userId parameter provided." });
     }
     const sql = "UPDATE notifications SET `is read` = 1 WHERE `user id` = ?";
     db_1.default.query(sql, [userId], (err) => {
         if (err) {
-            console.error("❌ Update notifications error:", err);
-            return res.status(500).json({ message: "Failed to update notifications" });
+            console.error("❌ Database update failure marking user notifications as read:", err);
+            return res.status(500).json({ success: false, message: "Failed to update notification states in database." });
         }
-        res.json({ success: true });
+        return res.status(200).json({ success: true });
     });
 };
 exports.markNotificationsRead = markNotificationsRead;
 /* ======================================================
-   ✅ MARK SINGLE NOTIFICATION AS READ (Backward Compatibility)
+   ✅ MARK SINGLE NOTIFICATION AS READ
+   POST /api/notifications/read-single/:id
 ====================================================== */
 const markSingleNotificationRead = (req, res) => {
     const notifId = Number(req.params.id);
-    if (!notifId) {
-        return res.status(400).json({ message: "Invalid notification ID" });
+    if (notifId === undefined || isNaN(notifId)) {
+        return res.status(400).json({ success: false, message: "Invalid notification ID parameter provided." });
     }
     const sql = "UPDATE notifications SET `is read` = 1 WHERE id = ?";
     db_1.default.query(sql, [notifId], (err) => {
         if (err) {
-            console.error("❌ Mark single notification read error:", err);
-            return res.status(500).json({ message: "Failed to update notification" });
+            console.error("❌ Database update failure marking single notification as read:", err);
+            return res.status(500).json({ success: false, message: "Failed to update notification state in database." });
         }
-        res.json({ success: true });
+        return res.status(200).json({ success: true });
     });
 };
 exports.markSingleNotificationRead = markSingleNotificationRead;
+/* ======================================================
+   ✅ REGISTER FCM TOKEN
+   POST /api/notifications/register-token
+====================================================== */
+const registerToken = (req, res) => {
+    const userId = req.user?.id;
+    const userRole = (req.user?.role || "CUSTOMER").toUpperCase();
+    const { token } = req.body;
+    if (!userId || !token) {
+        return res.status(400).json({ success: false, message: "Missing userId or FCM token" });
+    }
+    let table = "users";
+    if (userRole === "ADMIN")
+        table = "admins";
+    else if (userRole === "DELIVERY")
+        table = "delivery_partners";
+    else if (userRole === "TRANSPORT")
+        table = "transport_partners";
+    const sql = `UPDATE ${table} SET fcm_token = ? WHERE id = ?`;
+    db_1.default.query(sql, [token, userId], (err) => {
+        if (err) {
+            console.error(`❌ Database update failure saving FCM token for ${table}:`, err);
+            return res.status(500).json({ success: false, message: "Failed to save FCM token." });
+        }
+        return res.status(200).json({ success: true, message: "FCM token registered successfully." });
+    });
+};
+exports.registerToken = registerToken;
+/* ======================================================
+   ✅ UNREGISTER FCM TOKEN
+   DELETE /api/notifications/unregister-token
+====================================================== */
+const unregisterToken = (req, res) => {
+    const userId = req.user?.id;
+    const userRole = (req.user?.role || "CUSTOMER").toUpperCase();
+    if (!userId) {
+        return res.status(400).json({ success: false, message: "Missing userId" });
+    }
+    let table = "users";
+    if (userRole === "ADMIN")
+        table = "admins";
+    else if (userRole === "DELIVERY")
+        table = "delivery_partners";
+    else if (userRole === "TRANSPORT")
+        table = "transport_partners";
+    const sql = `UPDATE ${table} SET fcm_token = NULL WHERE id = ?`;
+    db_1.default.query(sql, [userId], (err) => {
+        if (err) {
+            console.error(`❌ Database update failure removing FCM token for ${table}:`, err);
+            return res.status(500).json({ success: false, message: "Failed to remove FCM token." });
+        }
+        return res.status(200).json({ success: true, message: "FCM token unregistered successfully." });
+    });
+};
+exports.unregisterToken = unregisterToken;
+/* ======================================================
+   ✅ SEND CUSTOM PUSH NOTIFICATION (ADMIN ONLY)
+   POST /api/notifications/send-custom
+====================================================== */
+const sendCustomPush = (req, res) => {
+    const userRole = (req.user?.role || "").toUpperCase();
+    if (userRole !== "ADMIN") {
+        return res.status(403).json({ success: false, message: "Forbidden: Admins only" });
+    }
+    const { title, body, data, targetRole = "CUSTOMER", targetUserId } = req.body;
+    if (!title || !body) {
+        return res.status(400).json({ success: false, message: "Missing title or body" });
+    }
+    let table = "users";
+    if (targetRole === "ADMIN")
+        table = "admins";
+    else if (targetRole === "DELIVERY")
+        table = "delivery_partners";
+    else if (targetRole === "TRANSPORT")
+        table = "transport_partners";
+    let sql = `SELECT fcm_token FROM ${table} WHERE fcm_token IS NOT NULL`;
+    const params = [];
+    if (targetUserId) {
+        sql += " AND id = ?";
+        params.push(targetUserId);
+    }
+    db_1.default.query(sql, params, (err, rows) => {
+        if (err) {
+            console.error(`❌ DB error fetching FCM tokens from ${table}:`, err);
+            return res.status(500).json({ success: false, message: "Failed to fetch tokens" });
+        }
+        const tokens = rows.map(r => r.fcm_token).filter(Boolean);
+        if (tokens.length === 0) {
+            return res.status(404).json({ success: false, message: "No registered devices found for target." });
+        }
+        (0, notification_utils_1.sendPushNotification)(tokens, title, body, data);
+        return res.status(200).json({
+            success: true,
+            message: `Push notification queued for ${tokens.length} devices.`
+        });
+    });
+};
+exports.sendCustomPush = sendCustomPush;

@@ -7,16 +7,101 @@ exports.upload = void 0;
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const uploadDir = path_1.default.join(__dirname, "../../uploads");
-if (!fs_1.default.existsSync(uploadDir)) {
-    fs_1.default.mkdirSync(uploadDir, { recursive: true });
+const storage_1 = require("@google-cloud/storage");
+// Safe local directory setup fallback
+const localUploadDir = path_1.default.join(process.cwd(), "uploads");
+if (!fs_1.default.existsSync(localUploadDir)) {
+    fs_1.default.mkdirSync(localUploadDir, { recursive: true });
 }
-const storage = multer_1.default.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    },
-});
-exports.upload = (0, multer_1.default)({ storage });
+let storageEngine;
+const bucketName = process.env.GCS_BUCKET;
+const keyFilename = process.env.GCS_KEYFILE || "./keyfile.json";
+if (bucketName) {
+    console.log(`☁️ Google Cloud Storage Upload Activated: Target Bucket [${bucketName}]`);
+    const gcsOptions = {};
+    if (fs_1.default.existsSync(keyFilename)) {
+        gcsOptions.keyFilename = keyFilename;
+    }
+    const gcs = new storage_1.Storage(gcsOptions);
+    const bucket = gcs.bucket(bucketName);
+    class GoogleCloudStorageEngine {
+        _handleFile(req, file, cb) {
+            let folder = "misc";
+            let isPublic = false;
+            // Determine folder and privacy based on fieldname or route
+            if (file.fieldname === "image") {
+                folder = "product_images";
+                isPublic = true;
+            }
+            else if (["profile_image", "dl_document", "rc_document", "aadhaar_document"].includes(file.fieldname)) {
+                if (req.originalUrl.includes("transport")) {
+                    folder = "partners/transport";
+                }
+                else {
+                    folder = "partners/delivery";
+                }
+                isPublic = false;
+            }
+            const originalNameClean = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+            const filename = `${folder}/${Date.now()}_${originalNameClean}`;
+            const gcsFile = bucket.file(filename);
+            const stream = gcsFile.createWriteStream({
+                metadata: {
+                    contentType: file.mimetype,
+                },
+                resumable: false,
+            });
+            file.stream.pipe(stream);
+            stream.on("error", (err) => {
+                cb(err);
+            });
+            stream.on("finish", async () => {
+                try {
+                    if (isPublic) {
+                        await gcsFile.makePublic();
+                        const publicUrl = `https://storage.googleapis.com/${bucketName}/${filename}`;
+                        cb(null, {
+                            filename: publicUrl,
+                            path: publicUrl,
+                        });
+                    }
+                    else {
+                        // Private files store the gs:// URI or just the path for later Signed URL generation
+                        const gsUri = `gs://${bucketName}/${filename}`;
+                        cb(null, {
+                            filename: gsUri,
+                            path: gsUri,
+                        });
+                    }
+                }
+                catch (err) {
+                    cb(err);
+                }
+            });
+        }
+        _removeFile(req, file, cb) {
+            const filename = file.filename.split("/").pop();
+            if (filename) {
+                bucket.file(filename).delete()
+                    .then(() => cb(null))
+                    .catch((err) => cb(err));
+            }
+            else {
+                cb(null);
+            }
+        }
+    }
+    storageEngine = new GoogleCloudStorageEngine();
+}
+else {
+    console.log("💻 Local Disk Upload Activated (Fallback): Saving files to ./uploads");
+    storageEngine = multer_1.default.diskStorage({
+        destination: (req, file, cb) => {
+            cb(null, localUploadDir);
+        },
+        filename: (req, file, cb) => {
+            cb(null, `${Date.now()}-${file.originalname}`);
+        },
+    });
+}
+exports.upload = (0, multer_1.default)({ storage: storageEngine });

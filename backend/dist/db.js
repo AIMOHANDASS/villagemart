@@ -11,7 +11,7 @@ const poolOptions = {
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: Number(process.env.DB_POOL_SIZE) || 50,
     queueLimit: 0
 };
 const hostValue = process.env.DB_HOST || "127.0.0.1";

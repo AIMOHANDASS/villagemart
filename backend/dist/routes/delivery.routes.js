@@ -7,10 +7,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const delivery_controller_1 = require("../controllers/delivery.controller");
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const upload_middleware_1 = require("../middleware/upload.middleware");
 const router = express_1.default.Router();
-// 🔐 Auth routes
-router.post("/signup", upload_middleware_1.upload.fields([{ name: 'profile_image', maxCount: 1 }, { name: 'dl_document', maxCount: 1 }, { name: 'rc_document', maxCount: 1 }, { name: 'aadhaar_document', maxCount: 1 }]), delivery_controller_1.signupDeliveryPartner);
+router.post("/signup", delivery_controller_1.signupDeliveryPartner);
 router.post("/login", delivery_controller_1.loginDeliveryPartner);
 router.post("/toggle-online", auth_middleware_1.verifyToken, auth_middleware_1.isDelivery, delivery_controller_1.toggleDeliveryOnline);
 // 📦 Get actionable orders for delivery (filter via ?status=)

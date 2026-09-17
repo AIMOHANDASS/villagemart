@@ -61,12 +61,12 @@ safeAddColumn("transport_bookings", "driver_id", "INT NULL");
    GET /api/location/nearby?lat=...&lng=...&type=transport
 ====================================================== */
 export const getNearbyDrivers = (req: any, res: any) => {
-  const lat = Number(req.query.lat);
-  const lng = Number(req.query.lng);
+  const lat = parseFloat(String(req.query.lat));
+  const lng = parseFloat(String(req.query.lng));
   const type = (req.query.type || 'transport').toLowerCase();
 
-  if (!lat || !lng) {
-    return res.status(400).json({ success: false, message: "Latitude and Longitude are required" });
+  if (isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ success: false, message: "Valid floating-point Latitude and Longitude are required" });
   }
 
   const sql = `

@@ -13,4 +13,6 @@ router.get("/list", address_controller_1.getUserAddresses);
 router.post("/add", address_controller_1.addUserAddress);
 router.put("/edit/:id", address_controller_1.editUserAddress);
 router.post("/select-active", address_controller_1.selectActiveNavbarAddress);
+router.put("/:id/default", address_controller_1.setDefaultAddress);
+router.delete("/:id", address_controller_1.deleteAddress);
 exports.default = router;

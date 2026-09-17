@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateSettings = exports.changePassword = exports.updateProfile = exports.getProfile = void 0;
+exports.updatePasswordDirect = exports.updateSettings = exports.changePassword = exports.updateProfile = exports.getProfile = void 0;
 const db_1 = __importDefault(require("../db"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 /* =========================
@@ -96,3 +96,40 @@ const updateSettings = (req, res) => {
     });
 };
 exports.updateSettings = updateSettings;
+/* ======================================================
+   🔐 DIRECT PASSWORD UPDATE (No OTP required for verified sessions)
+====================================================== */
+const updatePasswordDirect = async (req, res) => {
+    const authenticatedUserId = req.user?.id;
+    const userRole = String(req.user?.role || "").toUpperCase();
+    const { email, newPassword } = req.body;
+    if (!authenticatedUserId) {
+        return res.status(401).json({ success: false, message: "Unauthorized: Access Denied." });
+    }
+    if (!email || !newPassword || newPassword.length < 8) {
+        return res.status(400).json({ success: false, message: "New password must be at least 8 characters long." });
+    }
+    const targetTable = (userRole === "TRANSPORT" || userRole === "RIDER" || userRole === "TRANSPORT_PARTNER") ? "transport_partners" :
+        (userRole === "DELIVERY" || userRole === "DELIVERY_PARTNER") ? "delivery_partners" : "users";
+    try {
+        const secureHashedPassword = await bcryptjs_1.default.hash(newPassword, 12);
+        db_1.default.query(`UPDATE ${targetTable} SET password = ? WHERE id = ? AND email = ?`, [secureHashedPassword, authenticatedUserId, email.trim().toLowerCase()], (updateErr, result) => {
+            if (updateErr) {
+                console.error("❌ Direct password update DB error:", updateErr.message);
+                return res.status(500).json({ success: false, message: "Database query execution error." });
+            }
+            if (result && result.affectedRows === 0) {
+                return res.status(400).json({ success: false, message: "Email does not match your authenticated profile." });
+            }
+            return res.status(200).json({
+                success: true,
+                message: "Password has been updated successfully.",
+            });
+        });
+    }
+    catch (error) {
+        console.error("❌ Direct password update catch error:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to update password." });
+    }
+};
+exports.updatePasswordDirect = updatePasswordDirect;

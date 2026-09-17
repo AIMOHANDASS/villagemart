@@ -5,6 +5,7 @@ import {
   getPartyHallAvailability,
   getUserPartyHallBookings,
   confirmPartyHallBooking,
+  getPartyHallServiceStatus,
 } from "../controllers/partyHall.controller";
 
 const router = express.Router();
@@ -12,6 +13,7 @@ const router = express.Router();
 router.post("/book", createPartyHallBooking);
 router.get("/", getAllPartyHallBookings);
 router.get("/availability", getPartyHallAvailability);
+router.get("/status", getPartyHallServiceStatus);
 router.get("/user/:userId", getUserPartyHallBookings);
 router.post("/confirm/:bookingId", confirmPartyHallBooking);
 

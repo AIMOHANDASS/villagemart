@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.confirmPartyHallBooking = exports.getUserPartyHallBookings = exports.getAllPartyHallBookings = exports.getPartyHallAvailability = exports.createPartyHallBooking = void 0;
+exports.getPartyHallServiceStatus = exports.confirmPartyHallBooking = exports.getUserPartyHallBookings = exports.getAllPartyHallBookings = exports.getPartyHallAvailability = exports.createPartyHallBooking = void 0;
 const db_1 = __importDefault(require("../db"));
 const mailer_1 = require("../utils/mailer");
 const PARTY_HALL_BASE_CHARGE = 700;
@@ -80,74 +80,106 @@ const createPartyHallBooking = (req, res) => {
     if (!userId || !customerName || !customerPhone || !eventDate || !startTime) {
         return res.status(400).json({ message: "Invalid party hall booking data" });
     }
-    const totalPersons = Number(personCount || 0);
-    if (!Number.isFinite(totalPersons) || totalPersons <= 0) {
-        return res.status(400).json({ message: "Person count must be greater than 0" });
-    }
-    const start = toDateTime(eventDate, startTime);
-    if (Number.isNaN(start.getTime())) {
-        return res.status(400).json({ message: "Invalid start time" });
-    }
-    const end = new Date(start.getTime() + PARTY_HALL_DURATION_HOURS * 60 * 60 * 1000);
-    const endTime = formatTime(end);
-    const safeSnacks = Math.max(0, Number(snacksCount || 0));
-    const safeWater = Math.max(0, Number(waterCount || 0));
-    const safeCake = Math.max(0, Number(cakeCount || 0));
-    const selectedAddOns = Array.isArray(addOns)
-        ? addOns.map((a) => String(a).toLowerCase())
-        : [];
-    hasSlotOverlap(eventDate, startTime, endTime, (overlap, overlapErr) => {
-        if (overlapErr) {
-            console.error("❌ party hall overlap check error:", overlapErr);
-            return res.status(500).json({ message: "Failed to validate slot" });
+    // 1. Verify global settings state in DB
+    db_1.default.query("SELECT setting_value FROM system_settings WHERE setting_key = 'party_hall_service_available'", (settingErr, settings) => {
+        if (settingErr) {
+            console.error("❌ Failed to verify global setting:", settingErr);
+            return res.status(500).json({ success: false, message: "Server error verifying reservation status." });
         }
-        if (overlap) {
-            return res.status(409).json({
-                message: "This time slot is already booked. Please choose another slot.",
+        if (settings && settings.length > 0 && settings[0].setting_value === "false") {
+            return res.status(403).json({
+                success: false,
+                message: "Party Hall reservations are currently paused by administration.",
             });
         }
-        const addOnCharge = computeAddOnCharge(totalPersons, safeSnacks, safeWater, safeCake, selectedAddOns);
-        const totalCharge = Number((PARTY_HALL_BASE_CHARGE + addOnCharge).toFixed(2));
-        const sql = `
+        const totalPersons = Number(personCount || 0);
+        if (!Number.isFinite(totalPersons) || totalPersons <= 0) {
+            return res.status(400).json({ message: "Person count must be greater than 0" });
+        }
+        const start = toDateTime(eventDate, startTime);
+        if (Number.isNaN(start.getTime())) {
+            return res.status(400).json({ message: "Invalid start time" });
+        }
+        const end = new Date(start.getTime() + PARTY_HALL_DURATION_HOURS * 60 * 60 * 1000);
+        const endTime = formatTime(end);
+        const safeSnacks = Math.max(0, Number(snacksCount || 0));
+        const safeWater = Math.max(0, Number(waterCount || 0));
+        const safeCake = Math.max(0, Number(cakeCount || 0));
+        const selectedAddOns = Array.isArray(addOns)
+            ? addOns.map((a) => String(a).toLowerCase())
+            : [];
+        hasSlotOverlap(eventDate, startTime, endTime, (overlap, overlapErr) => {
+            if (overlapErr) {
+                console.error("❌ party hall overlap check error:", overlapErr);
+                return res.status(500).json({ message: "Failed to validate slot" });
+            }
+            if (overlap) {
+                return res.status(409).json({
+                    message: "This time slot is already booked. Please choose another slot.",
+                });
+            }
+            const addOnCharge = computeAddOnCharge(totalPersons, safeSnacks, safeWater, safeCake, selectedAddOns);
+            const totalCharge = Number((PARTY_HALL_BASE_CHARGE + addOnCharge).toFixed(2));
+            const sql = `
       INSERT INTO party_hall_bookings
       (\`user id\`, \`customer name\`, customer_phone, \`event date\`, \`start time\`, \`end time\`, person_count, \`snacks count\`, water_count, \`cake count\`, add_ons_json, notes, base_charge, add_on_charge, total_charge)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-        db_1.default.query(sql, [
-            Number(userId),
-            customerName,
-            customerPhone,
-            eventDate,
-            startTime,
-            endTime,
-            totalPersons,
-            safeSnacks,
-            safeWater,
-            safeCake,
-            JSON.stringify(selectedAddOns),
-            notes || null,
-            PARTY_HALL_BASE_CHARGE,
-            addOnCharge,
-            totalCharge,
-        ], (err, result) => {
-            if (err) {
-                console.error("❌ createPartyHallBooking error:", err);
-                return res.status(500).json({ message: "Failed to create party hall booking" });
-            }
-            db_1.default.query("INSERT INTO notifications (`user id`, message) VALUES (?,?)", [
+            db_1.default.query(sql, [
                 Number(userId),
-                `🏛 Party hall booked on ${eventDate} ${startTime}-${endTime}. Clarification: ${SUPPORT_NUMBER}`,
-            ]);
-            return res.json({
-                success: true,
-                bookingId: result.insertId,
-                start_time: startTime,
-                end_time: endTime,
-                duration_hours: PARTY_HALL_DURATION_HOURS,
-                base_charge: PARTY_HALL_BASE_CHARGE,
-                add_on_charge: addOnCharge,
-                total_charge: totalCharge,
-                support_number: SUPPORT_NUMBER,
+                customerName,
+                customerPhone,
+                eventDate,
+                startTime,
+                endTime,
+                totalPersons,
+                safeSnacks,
+                safeWater,
+                safeCake,
+                JSON.stringify(selectedAddOns),
+                notes || null,
+                PARTY_HALL_BASE_CHARGE,
+                addOnCharge,
+                totalCharge,
+            ], (err, result) => {
+                if (err) {
+                    console.error("❌ createPartyHallBooking error:", err);
+                    return res.status(500).json({ message: "Failed to create party hall booking" });
+                }
+                db_1.default.query("INSERT INTO notifications (`user id`, message) VALUES (?,?)", [
+                    Number(userId),
+                    `🏛 Party hall booked on ${eventDate} ${startTime}-${endTime}. Clarification: ${SUPPORT_NUMBER}`,
+                ]);
+                // 📧 Send E-commerce Receipt Invoice Email to the user immediately
+                db_1.default.query("SELECT email, name FROM users WHERE id = ?", [Number(userId)], (uErr, uRows) => {
+                    if (!uErr && uRows && uRows.length > 0) {
+                        const userEmail = uRows[0].email;
+                        const userName = uRows[0].name || customerName;
+                        (0, mailer_1.sendPartyHallBookingInvoiceMail)({
+                            to: userEmail,
+                            username: userName,
+                            bookingId: result.insertId,
+                            eventDate: eventDate,
+                            startTime: startTime,
+                            endTime: endTime,
+                            personCount: totalPersons,
+                            baseCharge: PARTY_HALL_BASE_CHARGE,
+                            addOnCharge: addOnCharge,
+                            totalCharge: totalCharge,
+                        }).catch(mailErr => console.error("❌ Failed to send party hall booking invoice email:", mailErr));
+                    }
+                });
+                return res.json({
+                    success: true,
+                    bookingId: result.insertId,
+                    start_time: startTime,
+                    end_time: endTime,
+                    duration_hours: PARTY_HALL_DURATION_HOURS,
+                    base_charge: PARTY_HALL_BASE_CHARGE,
+                    add_on_charge: addOnCharge,
+                    total_charge: totalCharge,
+                    support_number: SUPPORT_NUMBER,
+                });
             });
         });
     });
@@ -305,3 +337,15 @@ const confirmPartyHallBooking = (req, res) => {
     });
 };
 exports.confirmPartyHallBooking = confirmPartyHallBooking;
+const getPartyHallServiceStatus = (req, res) => {
+    const sql = "SELECT setting_value FROM system_settings WHERE setting_key = 'party_hall_service_available' LIMIT 1";
+    db_1.default.query(sql, (err, rows) => {
+        if (err) {
+            console.error("❌ getPartyHallServiceStatus error:", err);
+            return res.status(500).json({ available: true }); // Default to true on error
+        }
+        const isAvailable = rows && rows.length > 0 ? (rows[0].setting_value === "true" || rows[0].setting_value === "1") : true;
+        return res.status(200).json({ available: isAvailable });
+    });
+};
+exports.getPartyHallServiceStatus = getPartyHallServiceStatus;

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addUserAddress = exports.selectActiveNavbarAddress = exports.editUserAddress = exports.getUserAddresses = void 0;
+exports.deleteAddress = exports.setDefaultAddress = exports.addUserAddress = exports.selectActiveNavbarAddress = exports.editUserAddress = exports.getUserAddresses = void 0;
 const db_1 = __importDefault(require("../db"));
 // Endpoint A: Fetch all saved addresses for the logged-in customer
 const getUserAddresses = async (req, res) => {
@@ -97,3 +97,56 @@ const addUserAddress = async (req, res) => {
     }
 };
 exports.addUserAddress = addUserAddress;
+// Endpoint E: Set default/active address
+const setDefaultAddress = async (req, res) => {
+    const userId = req.user?.id;
+    const addressId = req.params.id;
+    try {
+        // 1. Mark all other user addresses as unselected
+        await db_1.default.promise().query("UPDATE user_addresses SET is_selected = 0 WHERE user_id = ?", [userId]);
+        // 2. Mark the selected address as active/selected
+        const [result] = await db_1.default.promise().query("UPDATE user_addresses SET is_selected = 1 WHERE id = ? AND user_id = ?", [addressId, userId]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: "Address not found" });
+        }
+        return res.status(200).json({ success: true, message: "📍 Default address set successfully!" });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+exports.setDefaultAddress = setDefaultAddress;
+// Endpoint F: Delete address
+const deleteAddress = async (req, res) => {
+    const userId = req.user?.id;
+    const addressId = req.params.id;
+    try {
+        // 1. Get all user addresses to check single address safeguard
+        const [addresses] = await db_1.default.promise().query("SELECT id, is_selected FROM user_addresses WHERE user_id = ? ORDER BY id DESC", [userId]);
+        if (addresses.length <= 1) {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot delete the only saved address. At least one address is required for delivery."
+            });
+        }
+        // 2. Find the address to delete
+        const targetAddress = addresses.find((addr) => String(addr.id) === String(addressId));
+        if (!targetAddress) {
+            return res.status(404).json({ success: false, message: "Address not found" });
+        }
+        // 3. Fallback protection: If the deleted address is the currently active one, select a new one
+        if (targetAddress.is_selected === 1) {
+            const nextDefault = addresses.find((addr) => String(addr.id) !== String(addressId));
+            if (nextDefault) {
+                await db_1.default.promise().query("UPDATE user_addresses SET is_selected = 1 WHERE id = ?", [nextDefault.id]);
+            }
+        }
+        // 4. Delete the address
+        await db_1.default.promise().query("DELETE FROM user_addresses WHERE id = ? AND user_id = ?", [addressId, userId]);
+        return res.status(200).json({ success: true, message: "🗑️ Address deleted successfully!" });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
+};
+exports.deleteAddress = deleteAddress;

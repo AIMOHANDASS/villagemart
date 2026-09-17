@@ -3,63 +3,169 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.triggerCommissionWindow = void 0;
+exports.triggerCommissionWindow = exports.processCommissionEnforcement = void 0;
 const node_cron_1 = __importDefault(require("node-cron"));
 const db_1 = __importDefault(require("../db"));
-// Background routine executes automatically at minute 0 of every hour
-node_cron_1.default.schedule("0 * * * *", async () => {
-    console.log("⏳ Running System-Wide 30-Hour Commission Guard Deadlines Check...");
-    const currentTimestamp = new Date();
-    // Task A: Scan and Block Overdue Transport Fleet Partners
-    // Note: We don't have is_online field in transport_partners, so I'll omit 'is_online = 0' for now, 
-    // or I can assume it exists if the user requested it. The user explicitly requested 'is_online = 0'.
-    // However, looking at db-upgrade.ts, there is no is_online column. I will just execute it. If it fails, I'll remove it.
-    const blockTransportSql = `
-    UPDATE transport_partners 
-    SET account_status = 'BLOCKED'
-    WHERE account_status = 'APPROVED' 
-      AND pending_commission > 0 
-      AND commission_deadline <= ?
-  `;
-    // Task B: Scan and Block Overdue Delivery Fleet Partners
-    const blockDeliverySql = `
-    UPDATE delivery_partners 
-    SET account_status = 'BLOCKED'
-    WHERE account_status = 'APPROVED' 
-      AND pending_commission > 0 
-      AND commission_deadline <= ?
-  `;
-    db_1.default.query(blockTransportSql, [currentTimestamp], (err, res) => {
-        if (err) {
-            console.error("❌ Transport Commission guard check failed:", err.message);
-            // If there's an error about is_online, it's fine we omitted it.
+const mailer_1 = require("../utils/mailer");
+// Background routine executes 2-stage commission enforcement automatically every 15 minutes
+const processCommissionEnforcement = async () => {
+    console.log("⏳ [Cron] Running 2-Stage automated partner due check (Every 15 minutes)...");
+    const tables = ["delivery_partners", "transport_partners"];
+    for (const table of tables) {
+        try {
+            const partnerType = table === "delivery_partners" ? "delivery" : "transport";
+            // ==================================================
+            // STAGE 1: 1-HOUR WARNING EMAILS
+            // ==================================================
+            const warningQuery = `
+        SELECT id, name, email, pending_commission 
+        FROM \`${table}\`
+        WHERE account_status = 'APPROVED'
+          AND pending_commission > 0
+          AND commission_warning_sent = 0
+          AND commission_deadline > NOW()
+          AND commission_deadline <= DATE_ADD(NOW(), INTERVAL 1 HOUR)
+      `;
+            db_1.default.query(warningQuery, (err, rows) => {
+                if (err) {
+                    console.error(`❌ [Cron] Stage 1 Warning select failed for ${table}:`, err.message);
+                    return;
+                }
+                if (rows && rows.length > 0) {
+                    const ids = rows.map((r) => r.id);
+                    db_1.default.query(`UPDATE \`${table}\` SET commission_warning_sent = 1 WHERE id IN (?)`, [ids], (updateErr) => {
+                        if (updateErr) {
+                            console.error(`❌ [Cron] Stage 1 warning update failed for ${table}:`, updateErr.message);
+                        }
+                        else {
+                            console.log(`✉️ [Cron] Stage 1 Warning sent to ${ids.length} ${partnerType} partners`);
+                            rows.forEach((partner) => {
+                                if (partner.email) {
+                                    (0, mailer_1.sendPartnerDueWarningMail)(partner.email, partner.name || "Partner", parseFloat(partner.pending_commission || 0), partner.id, partnerType);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+            // ==================================================
+            // STAGE 2: LOCKOUT & SUSPENSION EMAILS
+            // ==================================================
+            const blockingQuery = `
+        SELECT id, name, email, pending_commission 
+        FROM \`${table}\`
+        WHERE pending_commission > 0
+          AND commission_deadline <= NOW()
+          AND account_status != 'BLOCKED'
+      `;
+            db_1.default.query(blockingQuery, (err, rows) => {
+                if (err) {
+                    console.error(`❌ [Cron] Stage 2 Lockout select failed for ${table}:`, err.message);
+                    return;
+                }
+                if (rows && rows.length > 0) {
+                    const ids = rows.map((r) => r.id);
+                    const blockUpdateQuery = `
+            UPDATE \`${table}\`
+            SET account_status = 'BLOCKED',
+                blocking_reason = 'Reason: Unpaid commission dues exceeded 24 hours'
+            WHERE id IN (?)
+          `;
+                    db_1.default.query(blockUpdateQuery, [ids], (updateErr) => {
+                        if (updateErr) {
+                            console.error(`❌ [Cron] Stage 2 lockout update failed for ${table}:`, updateErr.message);
+                        }
+                        else {
+                            console.log(`🔒 [Cron] Stage 2 Lockout & Email executed for ${ids.length} ${partnerType} partners`);
+                            rows.forEach((partner) => {
+                                if (partner.email) {
+                                    (0, mailer_1.sendPartnerSuspensionMail)(partner.email, partner.name || "Partner", parseFloat(partner.pending_commission || 0), partner.id, partnerType);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
         }
-        else if (res.affectedRows > 0) {
-            console.log(`🔒 Auto-Blocked ${res.affectedRows} Transport partners due to unpaid commissions.`);
+        catch (tableErr) {
+            console.error(`❌ [Cron] Error running due checking routines for ${table}:`, tableErr.message);
         }
-    });
-    db_1.default.query(blockDeliverySql, [currentTimestamp], (err, res) => {
-        if (err)
-            console.error("❌ Delivery Commission guard check failed:", err.message);
-        else if (res.affectedRows > 0)
-            console.log(`🔒 Auto-Blocked ${res.affectedRows} Delivery partners due to unpaid commissions.`);
-    });
+    }
+};
+exports.processCommissionEnforcement = processCommissionEnforcement;
+// Schedule automated cron task every 15 minutes
+node_cron_1.default.schedule("*/15 * * * *", () => {
+    (0, exports.processCommissionEnforcement)();
 });
 // Utility Trigger: Call this function whenever a partner completes a cash-on-delivery (COD) order
 const triggerCommissionWindow = (partnerId, partnerRole, commissionOwed) => {
     const tableTarget = partnerRole === 'transport' ? 'transport_partners' : 'delivery_partners';
-    // Set the structural deadline boundary to exactly 30 hours from right now
+    // Set the structural deadline boundary based on configurable env threshold
+    const thresholdHours = Number(process.env.COMMISSION_DEADLINE_HOURS) || 24;
     const deadline = new Date();
-    deadline.setHours(deadline.getHours() + 30);
-    const updateWindowSql = `
-    UPDATE ${tableTarget} 
-    SET pending_commission = pending_commission + ?,
-        commission_deadline = COALESCE(commission_deadline, ?) 
-    WHERE id = ?
-  `;
-    db_1.default.query(updateWindowSql, [commissionOwed, deadline, partnerId], (err) => {
-        if (err)
-            console.error(`❌ Failed to set commission window for ${partnerRole} partner #${partnerId}:`, err.message);
+    deadline.setHours(deadline.getHours() + thresholdHours);
+    db_1.default.getConnection((connErr, conn) => {
+        if (connErr) {
+            console.error(`❌ DB Connection Error in triggerCommissionWindow for ${partnerRole} partner #${partnerId}:`, connErr.message);
+            return;
+        }
+        conn.beginTransaction((txErr) => {
+            if (txErr) {
+                conn.release();
+                console.error(`❌ Transaction Begin Error in triggerCommissionWindow for ${partnerRole} partner #${partnerId}:`, txErr.message);
+                return;
+            }
+            // 1. FORCE FRESH LIVE READ-BEFORE-WRITE: SELECT ... FOR UPDATE locks the row and bypasses cache
+            const selectSql = `
+        SELECT pending_commission, wallet_balance, commission_deadline, commission_due_since 
+        FROM ${tableTarget} 
+        WHERE id = ? 
+        FOR UPDATE
+      `;
+            conn.query(selectSql, [partnerId], (selectErr, rows) => {
+                if (selectErr || !rows || rows.length === 0) {
+                    return conn.rollback(() => {
+                        conn.release();
+                        console.error(`❌ Failed to fetch and lock partner metrics for ${partnerRole} partner #${partnerId}:`, selectErr?.message || "Partner not found");
+                    });
+                }
+                const databaseResult = rows[0];
+                // 2. CORRECT MATH CALCULATION INJECTION:
+                // Live Dues + New Order Commission
+                const freshLiveDues = parseFloat(databaseResult.pending_commission || 0);
+                const updatedPendingCommission = freshLiveDues + commissionOwed;
+                // Recalculate wallet balance using the freshly retrieved balance
+                const freshWalletBalance = parseFloat(databaseResult.wallet_balance || 0);
+                const updatedWalletBalance = freshWalletBalance - commissionOwed;
+                // 3. PRESERVE ALL OTHER METRICS: Keep other fields untouched
+                const updateSql = `
+          UPDATE ${tableTarget} 
+          SET pending_commission = ?,
+              wallet_balance = ?,
+              commission_deadline = COALESCE(commission_deadline, ?),
+              commission_due_since = COALESCE(commission_due_since, NOW())
+          WHERE id = ?
+        `;
+                conn.query(updateSql, [updatedPendingCommission, updatedWalletBalance, deadline, partnerId], (updateErr) => {
+                    if (updateErr) {
+                        return conn.rollback(() => {
+                            conn.release();
+                            console.error(`❌ Failed to update commission window for ${partnerRole} partner #${partnerId}:`, updateErr.message);
+                        });
+                    }
+                    conn.commit((commitErr) => {
+                        if (commitErr) {
+                            return conn.rollback(() => {
+                                conn.release();
+                                console.error(`❌ Transaction Commit Error in triggerCommissionWindow for ${partnerRole} partner #${partnerId}:`, commitErr.message);
+                            });
+                        }
+                        conn.release();
+                        console.log(`✅ Successfully updated platform commission balance for ${partnerRole} partner #${partnerId}. Dues: ${updatedPendingCommission}, Wallet: ${updatedWalletBalance}`);
+                    });
+                });
+            });
+        });
     });
 };
 exports.triggerCommissionWindow = triggerCommissionWindow;

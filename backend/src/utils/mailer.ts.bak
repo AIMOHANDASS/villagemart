@@ -1,0 +1,765 @@
+import nodemailer from "nodemailer";
+
+/* ================= EMAIL TRANSPORT ================= */
+
+export const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // TLS
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD, // ✅ APP PASSWORD ONLY
+  },
+  tls: {
+    rejectUnauthorized: false,
+  },
+});
+
+// ✅ Verify connection
+transporter.verify((error) => {
+  if (error) {
+    console.error("❌ Mail transporter error:", error);
+  } else {
+    console.log("✅ Mail server is ready to send messages");
+  }
+});
+
+/* ================= TYPES ================= */
+
+export interface OrderItem {
+  product_name: string;
+  unit_price: number;
+  weight: number;
+  total_price: number;
+  image: string;
+  gst?: number;
+}
+
+/* ================= SEND ORDER CONFIRM MAIL ================= */
+
+export async function sendOrderConfirmMail(
+  to: string,
+  username: string,
+  orderId: number,
+  totalAmount: number,
+  deliveryFee: number,
+  items: OrderItem[]
+) {
+  try {
+    console.log("📧 Sending mail to:", to);
+
+    const safeItems = Array.isArray(items) ? items : [];
+
+    const subtotal = safeItems.reduce(
+      (sum, item) => sum + Number(item.total_price || 0),
+      0
+    );
+
+    const totalGst = safeItems.reduce(
+      (sum, item) => sum + (Number(item.total_price || 0) * (Number(item.gst || 0) / 100)),
+      0
+    );
+
+    const safeDelivery = Number(deliveryFee || 0);
+    const grandTotal = subtotal + safeDelivery + totalGst;
+
+    const itemsHtml =
+      safeItems.length === 0
+        ? `
+        <tr>
+          <td colspan="5" style="text-align:center;color:#999;padding:12px;">
+            No items found
+          </td>
+        </tr>`
+        : safeItems
+            .map(
+              (item) => `
+        <tr>
+          <td><img src="${item.image}" width="60"/></td>
+          <td>${item.product_name} (${item.weight})</td>
+          <td>₹${item.unit_price}</td>
+          <td>${Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}</td>
+          <td>₹${item.total_price}</td>
+        </tr>`
+            )
+            .join("");
+
+    const html = `
+      <h2>✅ Order Confirmed - VillageMart</h2>
+      <p>Hello ${username},</p>
+      <p>Your order <b>#${orderId}</b> is confirmed.</p>
+
+      <table border="1" cellpadding="6" cellspacing="0">
+        <tr>
+          <th>Image</th>
+          <th>Product</th>
+          <th>Unit Price</th>
+          <th>Qty</th>
+          <th>Total</th>
+        </tr>
+        ${itemsHtml}
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Subtotal:</strong></td>
+          <td>₹${subtotal.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Estimated GST:</strong></td>
+          <td>₹${totalGst.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Delivery Fee:</strong></td>
+          <td>₹${safeDelivery.toFixed(2)}</td>
+        </tr>
+      </table>
+
+      <h3>Grand Total: ₹${grandTotal.toFixed(2)}</h3>
+
+      <p>Thank you for shopping with VillageMart.</p>
+    `;
+
+    const info = await transporter.sendMail({
+      from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `Order Confirmed (#${orderId})`,
+      html,
+    });
+
+    console.log("✅ Mail sent:", info.messageId);
+    return true;
+  } catch (error) {
+    console.error("❌ Mail send failed:", error);
+    throw error;
+  }
+}
+
+/* ================= SEND DELIVERY PARTNER ASSIGNED MAIL ================= */
+
+export async function sendDeliveryPartnerAssignedMail(
+  to: string,
+  username: string,
+  orderId: number,
+  totalAmount: number,
+  deliveryFee: number,
+  items: OrderItem[],
+  partnerName: string,
+  partnerPhone: string
+) {
+  try {
+    const safeItems = Array.isArray(items) ? items : [];
+
+    const subtotal = safeItems.reduce(
+      (sum, item) => sum + Number(item.total_price || 0),
+      0
+    );
+
+    const totalGst = safeItems.reduce(
+      (sum, item) => sum + (Number(item.total_price || 0) * (Number(item.gst || 0) / 100)),
+      0
+    );
+
+    const safeDelivery = Number(deliveryFee || 0);
+    const grandTotal = subtotal + safeDelivery + totalGst;
+
+    const itemsHtml =
+      safeItems.length === 0
+        ? `
+        <tr>
+          <td colspan="5" style="text-align:center;color:#999;padding:12px;">
+            No items found
+          </td>
+        </tr>`
+        : safeItems
+            .map(
+              (item) => `
+        <tr>
+          <td><img src="${item.image}" width="60"/></td>
+          <td>${item.product_name} (${item.weight})</td>
+          <td>₹${item.unit_price}</td>
+          <td>${Math.round(Number(item.total_price || 0) / Number(item.unit_price || 1)) || 1}</td>
+          <td>₹${item.total_price}</td>
+        </tr>`
+            )
+            .join("");
+
+    const html = `
+      <h2>🚚 Delivery Partner Assigned - VillageMart</h2>
+      <p>Hello ${username},</p>
+      <p>Great news! A delivery partner has accepted your order <b>#${orderId}</b> and is preparing for pickup.</p>
+      
+      <div style="background-color: #f0fdf4; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #bbf7d0;">
+        <h3 style="margin-top: 0; color: #166534;">Delivery Partner Details</h3>
+        <p style="margin: 5px 0;"><b>Name:</b> ${partnerName}</p>
+        <p style="margin: 5px 0;"><b>Mobile:</b> ${partnerPhone}</p>
+      </div>
+
+      <table border="1" cellpadding="6" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+        <tr style="background-color: #f8fafc;">
+          <th>Image</th>
+          <th>Product</th>
+          <th>Unit Price</th>
+          <th>Qty</th>
+          <th>Total</th>
+        </tr>
+        ${itemsHtml}
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Subtotal:</strong></td>
+          <td>₹${subtotal.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Estimated GST:</strong></td>
+          <td>₹${totalGst.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right"><strong>Delivery Fee:</strong></td>
+          <td>₹${safeDelivery.toFixed(2)}</td>
+        </tr>
+      </table>
+
+      <h3>Grand Total: ₹${grandTotal.toFixed(2)}</h3>
+
+      <p>You can track your order status in the app.</p>
+      <p>Thank you for shopping with VillageMart.</p>
+    `;
+
+    const info = await transporter.sendMail({
+      from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `Delivery Partner Assigned for Order #${orderId}`,
+      html,
+    });
+
+    console.log("✅ Delivery Partner Assigned Mail sent:", info.messageId);
+    return true;
+  } catch (error) {
+    console.error("❌ Delivery Partner Assigned Mail send failed:", error);
+    // Don't throw to prevent blocking the main flow
+  }
+}
+
+/* ================= SEND EMAIL OTP (✅ ADDED) ================= */
+
+export async function sendEmailOtpMail(
+  to: string,
+  otp: string
+) {
+  try {
+    console.log("📧 Sending Email OTP to:", to);
+
+    const html = `
+      <div style="font-family:Arial;padding:20px;">
+        <h2 style="color:#2563eb;">VillageMart Email Verification</h2>
+        <p>Your verification code is:</p>
+        <h1 style="letter-spacing:4px;">${otp}</h1>
+        <p>This OTP is valid for 5 minutes.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+        <hr/>
+        <small>VillageMart Security System</small>
+      </div>
+    `;
+
+    const info = await transporter.sendMail({
+      from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: "VillageMart Email Verification OTP",
+      html,
+    });
+
+    console.log("✅ Email OTP sent:", info.messageId);
+    return true;
+  } catch (error) {
+    console.error("❌ Email OTP send failed:", error);
+    throw error;
+  }
+}
+
+
+export async function sendTransportBookingConfirmMail(params: {
+  to: string;
+  username: string;
+  bookingId: number;
+  fromAddress: string;
+  toAddress: string;
+  distanceKm: number;
+  chargeAmount: number;
+}) {
+  const html = `
+    <h2>✅ Transport Booking Confirmed - VillageMart</h2>
+    <p>Hello ${params.username},</p>
+    <p>Your transport booking <b>#${params.bookingId}</b> has been confirmed by admin.</p>
+    <p><b>From:</b> ${params.fromAddress}</p>
+    <p><b>To:</b> ${params.toAddress}</p>
+    <p><b>Distance:</b> ${Number(params.distanceKm || 0).toFixed(2)} km</p>
+    <p><b>Charge:</b> ₹${Number(params.chargeAmount || 0).toFixed(2)}</p>
+    <p>Thank you for using VillageMart Transport.</p>
+  `;
+
+  return transporter.sendMail({
+    from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+    to: params.to,
+    subject: `Transport Booking Confirmed (#${params.bookingId})`,
+    html,
+  });
+}
+
+export async function sendPartyHallBookingConfirmMail(params: {
+  to: string;
+  username: string;
+  bookingId: number;
+  eventDate: string;
+  startTime: string;
+  endTime: string;
+  personCount: number;
+  totalCharge: number;
+  supportNumber: string;
+}) {
+  const html = `
+    <h2>✅ Party Hall Booking Confirmed - VillageMart</h2>
+    <p>Hello ${params.username},</p>
+    <p>Your party hall booking <b>#${params.bookingId}</b> has been confirmed by admin.</p>
+    <p><b>Date:</b> ${params.eventDate}</p>
+    <p><b>Time:</b> ${params.startTime} - ${params.endTime}</p>
+    <p><b>Persons:</b> ${Number(params.personCount || 0)}</p>
+    <p><b>Total Charge:</b> ₹${Number(params.totalCharge || 0).toFixed(2)}</p>
+    <p>For clarification: ${params.supportNumber}</p>
+    <p>Thank you for choosing VillageMart.</p>
+  `;
+
+  return transporter.sendMail({
+    from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+    to: params.to,
+    subject: `Party Hall Booking Confirmed (#${params.bookingId})`,
+    html,
+  });
+}
+
+/* ================= COMMISSION NOTIFICATIONS ================= */
+
+export async function sendCommissionOverdueMail(to: string, partnerName: string, amountDue: number, paymentLink: string = "") {
+  try {
+    const actionButtonHtml = paymentLink 
+      ? `
+        <div style="margin: 24px 0; text-align: center;">
+          <a href="${paymentLink}" target="_blank" style="background-color: #dc2626; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 6px rgba(220, 38, 38, 0.2);">
+            Pay Dues Now
+          </a>
+        </div>
+      `
+      : "";
+
+    const html = `
+      <div style="font-family:Arial;padding:25px;border:2px solid #fecaca;border-radius:12px;max-width:480px;margin:0 auto;color:#334155;">
+        <h2 style="color:#dc2626;margin-top:0;">⚠ Outstanding Commission Due - Account Blocked</h2>
+        <p>Dear <strong>${partnerName}</strong>,</p>
+        <p>Your account has been temporarily <strong>BLOCKED</strong> because your pending commission balance of <strong style="color:#dc2626;">₹${Number(amountDue).toFixed(2)}</strong> has not been paid before the deadline.</p>
+        
+        ${actionButtonHtml}
+        
+        <p style="color:#dc2626;font-weight:bold;text-align:center;">Please clear your outstanding dues immediately using the button above to automatically unblock and restore full access to rides and orders.</p>
+        <hr style="border:0;border-top:1px solid #e2e8f0;margin:20px 0;"/>
+        <p>Thank you,</p>
+        <p><strong>VillageMart Logistics Team</strong></p>
+      </div>
+    `;
+    return await transporter.sendMail({
+      from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+      to: to || "ram@gmail.com",
+      subject: `⚠ URGENT: Outstanding Commission Due (Account Blocked)`,
+      html,
+    });
+  } catch (err) {
+    console.error("❌ Failed to send commission overdue email:", err);
+  }
+}
+
+export async function sendCommissionClearedAdminMail(partnerName: string, partnerRole: string, amountCleared: number) {
+  try {
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.EMAIL_USER || "villagemartservices@gmail.com";
+    const html = `
+      <div style="font-family:Arial;padding:20px;border:1px solid #bbf7d0;border-radius:8px;">
+        <h2 style="color:#16a34a;">✅ Dues Collected Successfully</h2>
+        <p>Hello Admin,</p>
+        <p>Outstanding commission dues of <strong>₹${Number(amountCleared).toFixed(2)}</strong> have been successfully collected from partner <strong>${partnerName}</strong> (${partnerRole} fleet).</p>
+        <p>The partner's account has been successfully unblocked and their commission trackers have been cleanly reset.</p>
+        <p>Date/Time: ${new Date().toLocaleString("en-IN")}</p>
+        <hr/>
+        <small>VillageMart Automated Billing Engine</small>
+      </div>
+    `;
+    return await transporter.sendMail({
+      from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+      to: adminEmail,
+      subject: `✅ Dues Collected: ${partnerName} (${partnerRole})`,
+      html,
+    });
+  } catch (err) {
+    console.error("❌ Failed to send commission cleared admin email:", err);
+  }
+}
+
+export async function sendCommissionReceiptPartnerMail(to: string, partnerName: string, amountPaid: number, paymentId: string) {
+  try {
+    const html = `
+      <div style="font-family:Arial;padding:20px;border:1px solid #bbf7d0;border-radius:8px;">
+        <h2 style="color:#16a34a;">💰 Commission Payment Receipt</h2>
+        <p>Dear ${partnerName},</p>
+        <p>Thank you for settling your platform commission. We have received your payment successfully.</p>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;margin:15px 0;">
+          <tr>
+            <th style="background-color:#f8fafc;text-align:left;padding:8px;">Payment ID</th>
+            <td style="padding:8px;">${paymentId}</td>
+          </tr>
+          <tr>
+            <th style="background-color:#f8fafc;text-align:left;padding:8px;">Amount Paid</th>
+            <td style="padding:8px;">₹${Number(amountPaid).toFixed(2)}</td>
+          </tr>
+          <tr>
+            <th style="background-color:#f8fafc;text-align:left;padding:8px;">Status</th>
+            <td style="padding:8px;color:#16a34a;font-weight:bold;">Success / Cleared</td>
+          </tr>
+        </table>
+        <p>Your account status has been updated to <strong>APPROVED</strong>, and full access to rides/orders has been restored.</p>
+        <p>Thank you for partnering with VillageMart.</p>
+        <hr/>
+        <small>VillageMart Automated Billing System</small>
+      </div>
+    `;
+    return await transporter.sendMail({
+      from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+      to: to || "ram@gmail.com",
+      subject: `📜 VillageMart Payment Receipt: Commission Settle Dues`,
+      html,
+    });
+  } catch (err) {
+    console.error("❌ Failed to send partner commission receipt email:", err);
+  }
+}
+
+export async function sendPartnerDueWarningMail(to: string, partnerName: string, dueAmount: number, partnerId: number, partnerType: string = "delivery") {
+  try {
+    const payLink = `https://payment.villagemart.in/pay-due?partnerId=${partnerId}&amount=${dueAmount}&partnerType=${partnerType}`;
+    const html = `
+      <div style="font-family:Arial,sans-serif;padding:25px;border:1px solid #fef08a;border-radius:12px;max-width:600px;background-color:#fffef3;">
+        <h2 style="color:#ca8a04;margin-top:0;">⚠️ Urgent Payment Warning</h2>
+        <p>Dear ${partnerName},</p>
+        <p>Your VillageMart Partner Due of <strong>₹${Number(dueAmount).toFixed(2)}</strong> is expiring in 1 hour.</p>
+        <p style="font-weight:bold;color:#b45309;">Please clear it immediately to avoid automatic profile suspension and loss of order feeds.</p>
+        <div style="margin:25px 0;">
+          <a href="${payLink}" style="background-color:#ca8a04;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;display:inline-block;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">Pay Due Dues Now</a>
+        </div>
+        <p>If you have already paid, please ignore this email.</p>
+        <hr style="border:0;border-top:1px solid #fef08a;margin:20px 0;"/>
+        <small style="color:#71717a;">VillageMart Operations Center</small>
+      </div>
+    `;
+    return await transporter.sendMail({
+      from: `"VillageMart Operations" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `🚨 Urgent: Your VillageMart Partner Due ₹${Number(dueAmount).toFixed(2)} is expiring soon!`,
+      html,
+      headers: {
+        "X-Priority": "1",
+        "X-MSMail-Priority": "High",
+        "Importance": "High"
+      }
+    });
+  } catch (err) {
+    console.error("❌ Failed to send partner due warning email:", err);
+  }
+}
+
+export async function sendPartnerSuspensionMail(to: string, partnerName: string, dueAmount: number, partnerId: number, partnerType: string = "delivery") {
+  try {
+    const payLink = `https://payment.villagemart.in/pay-due?partnerId=${partnerId}&amount=${dueAmount}&partnerType=${partnerType}`;
+    const html = `
+      <div style="font-family:Arial,sans-serif;padding:25px;border:1px solid #fecaca;border-radius:12px;max-width:600px;background-color:#fff5f5;">
+        <h2 style="color:#dc2626;margin-top:0;">❌ Profile Suspended Automatically</h2>
+        <p>Dear ${partnerName},</p>
+        <p>Your VillageMart Partner profile has been automatically suspended due to uncollected application dues of <strong>₹${Number(dueAmount).toFixed(2)}</strong>.</p>
+        <p style="font-weight:bold;color:#991b1b;">Your feed access has been locked out. Click the button below to settle dues and instantly restore your account access.</p>
+        <div style="margin:25px 0;">
+          <a href="${payLink}" style="background-color:#dc2626;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;display:inline-block;box-shadow:0 4px 6px -1px rgba(0,0,0,0.15);">Pay Dues & Unblock Profile</a>
+        </div>
+        <hr style="border:0;border-top:1px solid #fecaca;margin:20px 0;"/>
+        <small style="color:#71717a;">VillageMart Security Enforcement</small>
+      </div>
+    `;
+    return await transporter.sendMail({
+      from: `"VillageMart Security" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `🛑 Account Suspended: VillageMart Partner Dues Overdue`,
+      html,
+    });
+  } catch (err) {
+    console.error("❌ Failed to send partner suspension email:", err);
+  }
+}
+
+export async function sendPartnerUnblockedPushMail(to: string, partnerName: string) {
+  try {
+    const html = `
+      <div style="font-family:Arial,sans-serif;padding:25px;border:1px solid #bbf7d0;border-radius:12px;max-width:600px;background-color:#f0fdf4;">
+        <h2 style="color:#16a34a;margin-top:0;">⚡ Account Restored Successfully!</h2>
+        <p>Dear ${partnerName},</p>
+        <p>Payment verified successfully, Macha! Your VillageMart Partner account has been automatically unblocked.</p>
+        <p style="font-weight:bold;color:#15803d;font-size:16px;">Go online and start accepting orders right away! 🚀</p>
+        <hr style="border:0;border-top:1px solid #bbf7d0;margin:20px 0;"/>
+        <small style="color:#71717a;">VillageMart Operations Center</small>
+      </div>
+    `;
+    return await transporter.sendMail({
+      from: `"VillageMart Support" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `⚡ VillageMart Partner Account Restored Successfully!`,
+      html,
+    });
+  } catch (err) {
+    console.error("❌ Failed to send partner unblocked notification email:", err);
+  }
+}
+
+export async function sendRideBookingInvoiceMail(params: {
+  to: string;
+  username: string;
+  bookingId: number;
+  fromAddress: string;
+  toAddress: string;
+  distanceKm: number;
+  vehicleType: string;
+  chargeAmount: number;
+  otpCode: string;
+}) {
+  const total = Number(params.chargeAmount || 0);
+  const tax = Number((total * 0.05).toFixed(2));
+  const baseFare = Number((total - tax).toFixed(2));
+  const distance = Number(params.distanceKm || 0).toFixed(2);
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>VillageMart Ride Request Receipt</title>
+      <style>
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 0; color: #333; }
+        .wrapper { width: 100%; table-layout: fixed; background-color: #f6f9fc; padding: 40px 0; }
+        .content { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e8ebf0; }
+        .header { background: linear-gradient(135deg, #f59e0b, #d97706); padding: 30px; text-align: center; color: #ffffff; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+        .header p { margin: 5px 0 0 0; font-size: 14px; opacity: 0.9; }
+        .body { padding: 30px; }
+        .greeting { font-size: 16px; line-height: 1.5; color: #4a5568; margin-bottom: 20px; }
+        .status-box { background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; border-radius: 6px; margin-bottom: 25px; }
+        .status-box p { margin: 0; font-size: 14px; color: #b45309; line-height: 1.5; font-weight: 500; }
+        .invoice-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .invoice-table th { text-align: left; padding: 12px; border-bottom: 2px solid #edf2f7; color: #718096; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .invoice-table td { padding: 12px; border-bottom: 1px solid #edf2f7; font-size: 14px; color: #2d3748; }
+        .invoice-table .amount { text-align: right; }
+        .invoice-table .total-row td { border-top: 2px solid #edf2f7; font-weight: 700; font-size: 16px; color: #1a202c; border-bottom: none; padding-top: 15px; }
+        .meta-grid { display: table; width: 100%; margin-bottom: 25px; }
+        .meta-col { display: table-cell; width: 50%; padding-right: 10px; }
+        .meta-col p { margin: 4px 0; font-size: 13px; color: #718096; }
+        .meta-col strong { color: #2d3748; }
+        .footer { background-color: #f7fafc; padding: 20px; text-align: center; border-top: 1px solid #edf2f7; font-size: 12px; color: #a0aec0; }
+        .footer p { margin: 5px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="wrapper">
+        <div class="content">
+          <div class="header">
+            <h1>VillageMart Ride Request</h1>
+            <p>Booking ID: #${params.bookingId}</p>
+          </div>
+          <div class="body">
+            <p class="greeting">Hello <strong>${params.username}</strong>,</p>
+            <div class="status-box">
+              <p>Your VillageMart Ride Request has been successfully placed! We are currently matching you with an optimal nearby transport partner.</p>
+            </div>
+            
+            <div style="background-color: #fff7ed; border: 2px dashed #f97316; border-radius: 12px; padding: 16px; margin: 20px 0; text-align: center;">
+              <p style="margin: 0; font-size: 12px; font-weight: bold; color: #c2410c; text-transform: uppercase; letter-spacing: 1px;">
+                🔒 Your Ride Verification OTP
+              </p>
+              <h1 style="margin: 8px 0 0 0; font-size: 32px; font-weight: 900; color: #ea580c; letter-spacing: 6px;">
+                ${params.otpCode}
+              </h1>
+              <p style="margin: 6px 0 0 0; font-size: 11px; color: #78350f;">
+                Share this OTP with your driver ONLY when starting the ride.
+              </p>
+            </div>
+            
+            <div class="meta-grid">
+              <div class="meta-col">
+                <p><strong>From:</strong> ${params.fromAddress}</p>
+                <p><strong>To:</strong> ${params.toAddress}</p>
+              </div>
+              <div class="meta-col">
+                <p><strong>Vehicle:</strong> ${params.vehicleType.toUpperCase()}</p>
+                <p><strong>Distance:</strong> ${distance} km</p>
+              </div>
+            </div>
+
+            <table class="invoice-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th class="amount">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Base Ride Fare</td>
+                  <td class="amount">₹${baseFare.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>Platform Taxes (5%)</td>
+                  <td class="amount">₹${tax.toFixed(2)}</td>
+                </tr>
+                <tr class="total-row">
+                  <td>Estimated Total</td>
+                  <td class="amount">₹${total.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="footer">
+            <p>VillageMart Services &bull; Happy Riding!</p>
+            <p>If you have any questions, please contact support.</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  return transporter.sendMail({
+    from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+    to: params.to,
+    subject: `VillageMart Ride Request Placed - #${params.bookingId}`,
+    html,
+  });
+}
+
+export async function sendPartyHallBookingInvoiceMail(params: {
+  to: string;
+  username: string;
+  bookingId: number;
+  eventDate: string;
+  startTime: string;
+  endTime: string;
+  personCount: number;
+  baseCharge: number;
+  addOnCharge: number;
+  totalCharge: number;
+}) {
+  const subtotal = Number(params.baseCharge || 0) + Number(params.addOnCharge || 0);
+  const gst = Number((subtotal * 0.18).toFixed(2));
+  const securityDeposit = 500.00;
+  const grandTotal = Number((subtotal + gst + securityDeposit).toFixed(2));
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>VillageMart Party Hall Booking Request</title>
+      <style>
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 0; color: #333; }
+        .wrapper { width: 100%; table-layout: fixed; background-color: #f6f9fc; padding: 40px 0; }
+        .content { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e8ebf0; }
+        .header { background: linear-gradient(135deg, #10b981, #059669); padding: 30px; text-align: center; color: #ffffff; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+        .header p { margin: 5px 0 0 0; font-size: 14px; opacity: 0.9; }
+        .body { padding: 30px; }
+        .greeting { font-size: 16px; line-height: 1.5; color: #4a5568; margin-bottom: 20px; }
+        .status-box { background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 15px; border-radius: 6px; margin-bottom: 25px; }
+        .status-box p { margin: 0; font-size: 14px; color: #065f46; line-height: 1.5; font-weight: 600; text-transform: uppercase; }
+        .invoice-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .invoice-table th { text-align: left; padding: 12px; border-bottom: 2px solid #edf2f7; color: #718096; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .invoice-table td { padding: 12px; border-bottom: 1px solid #edf2f7; font-size: 14px; color: #2d3748; }
+        .invoice-table .amount { text-align: right; }
+        .invoice-table .total-row td { border-top: 2px solid #edf2f7; font-weight: 700; font-size: 16px; color: #1a202c; border-bottom: none; padding-top: 15px; }
+        .meta-grid { display: table; width: 100%; margin-bottom: 25px; }
+        .meta-col { display: table-cell; width: 50%; padding-right: 10px; }
+        .meta-col p { margin: 4px 0; font-size: 13px; color: #718096; }
+        .meta-col strong { color: #2d3748; }
+        .footer { background-color: #f7fafc; padding: 20px; text-align: center; border-top: 1px solid #edf2f7; font-size: 12px; color: #a0aec0; }
+        .footer p { margin: 5px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="wrapper">
+        <div class="content">
+          <div class="header">
+            <h1>Party Hall Reservation Request</h1>
+            <p>Reference ID: #${params.bookingId}</p>
+          </div>
+          <div class="body">
+            <p class="greeting">Hello <strong>${params.username}</strong>,</p>
+            <div class="status-box">
+              <p>Payment Status Header: PENDING CONFIRMATION</p>
+            </div>
+            
+            <div class="meta-grid">
+              <div class="meta-col">
+                <p><strong>Event Date:</strong> ${params.eventDate}</p>
+                <p><strong>Time Slot:</strong> ${params.startTime} - ${params.endTime}</p>
+              </div>
+              <div class="meta-col">
+                <p><strong>Person Count:</strong> ${params.personCount}</p>
+                <p><strong>Support Phone:</strong> 91+ 8903003808</p>
+              </div>
+            </div>
+
+            <table class="invoice-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th class="amount">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Base Hall Rent</td>
+                  <td class="amount">₹${Number(params.baseCharge).toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>Add-On Charges</td>
+                  <td class="amount">₹${Number(params.addOnCharge).toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>GST / Taxes (18%)</td>
+                  <td class="amount">₹${gst.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>Security Deposit (Refundable)</td>
+                  <td class="amount">₹${securityDeposit.toFixed(2)}</td>
+                </tr>
+                <tr class="total-row">
+                  <td>Total Amount</td>
+                  <td class="amount">₹${grandTotal.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="footer">
+            <p>VillageMart Services &bull; Making Events Memorable!</p>
+            <p>If you have any questions, please contact support.</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  return transporter.sendMail({
+    from: `"VillageMart" <${process.env.EMAIL_USER}>`,
+    to: params.to,
+    subject: `Party Hall Booking Reservation Request - #${params.bookingId}`,
+    html,
+  });
+}
+
+

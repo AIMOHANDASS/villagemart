@@ -17,12 +17,7 @@ import { upload } from "../middleware/upload.middleware";
 
 const router = express.Router();
 
-// 🔐 Auth routes
-router.post(
-  "/signup",
-  upload.fields([{ name: 'profile_image', maxCount: 1 }, { name: 'dl_document', maxCount: 1 }, { name: 'rc_document', maxCount: 1 }, { name: 'aadhaar_document', maxCount: 1 }]),
-  signupDeliveryPartner
-);
+router.post("/signup", signupDeliveryPartner);
 router.post("/login", loginDeliveryPartner);
 router.post("/toggle-online", verifyToken, isDelivery, toggleDeliveryOnline);
 

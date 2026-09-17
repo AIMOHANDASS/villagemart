@@ -3,19 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.autoAssignNearestDriver = exports.toggleTransportOnline = exports.getDriverEarnings = exports.updateDriverLocation = exports.verifyRideOtp = exports.updateRideStatus = exports.acceptRide = exports.getMyActiveRide = exports.getDriverBookings = exports.loginTransportPartner = exports.signupTransportPartner = exports.triggerOrderNotification = void 0;
+exports.getDriverTrips = exports.autoAssignNearestDriver = exports.toggleTransportOnline = exports.getDriverEarnings = exports.updateDriverLocation = exports.verifyRideOtp = exports.markCashCollected = exports.updateRideStatus = exports.acceptRide = exports.getMyActiveRide = exports.getDriverBookings = exports.loginTransportPartner = exports.signupTransportPartner = void 0;
 const db_1 = __importDefault(require("../db"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const mailer_1 = require("../utils/mailer");
-const triggerOrderNotification = (userId, textMessage) => {
-    const sql = "INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)";
-    db_1.default.query(sql, [userId, textMessage], (err) => {
-        if (err)
-            console.error("❌ Failed to log automated background notification row:", err);
-    });
-};
-exports.triggerOrderNotification = triggerOrderNotification;
+const commissionGuard_1 = require("../cron/commissionGuard");
+const server_1 = require("../server");
+const notification_utils_1 = require("../utils/notification.utils");
 /* ======================================================
    🗂 ENSURE TRANSPORT PARTNERS TABLE EXISTS
 ====================================================== */
@@ -43,29 +38,30 @@ db_1.default.query(`CREATE TABLE IF NOT EXISTS transport_partners (
    POST /api/transport-driver/signup
 ====================================================== */
 const signupTransportPartner = async (req, res) => {
-    const { name, email, phone, password, vehicle_type, vehicle_number, license_number } = req.body;
-    if (!name || !email || !phone || !password) {
-        return res.status(400).json({ success: false, message: "Name, email, phone, and password are required" });
+    const { name, email, phone, password, vehicle_type, vehicle_number, license_number, district, taluk, profile_image, dl_document_url, rc_document_url, aadhaar_document_url } = req.body;
+    if (!name || !email || !phone || !password || !vehicle_type || !vehicle_number || !license_number || !district || !taluk) {
+        return res.status(400).json({ success: false, message: "All fields are required to complete partner registration." });
     }
-    const files = req.files;
-    const profile_image = files?.['profile_image']?.[0]?.filename || null;
-    const dl_document_url = files?.['dl_document']?.[0]?.filename || null;
-    const rc_document_url = files?.['rc_document']?.[0]?.filename || null;
-    const aadhaar_document_url = files?.['aadhaar_document']?.[0]?.filename || null;
+    if (!profile_image || !dl_document_url || !rc_document_url || !aadhaar_document_url) {
+        return res.status(400).json({ success: false, message: "Required partner documents were not uploaded" });
+    }
     try {
-        const checkSql = "SELECT id FROM transport_partners WHERE email = ? LIMIT 1";
-        db_1.default.query(checkSql, [email], async (checkErr, rows) => {
+        const checkSql = "SELECT id, email, phone FROM transport_partners WHERE email = ? OR phone = ? LIMIT 1";
+        db_1.default.query(checkSql, [email, phone], async (checkErr, rows) => {
             if (checkErr)
                 return res.status(500).json({ success: false, message: "Database error" });
-            if (rows.length > 0)
-                return res.status(409).json({ success: false, message: "Email already exists" });
+            if (rows.length > 0) {
+                const match = rows[0];
+                const conflictField = match.email === email ? 'email address' : 'phone number';
+                return res.status(409).json({ success: false, message: `A partner with this ${conflictField} already exists` });
+            }
             const hashedPassword = await bcryptjs_1.default.hash(password, 10);
             const sql = `
         INSERT INTO transport_partners 
-        (name, phone, email, password, vehicle_type, vehicle_number, license_number, profile_image, dl_document_url, rc_document_url, aadhaar_document_url, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        (name, phone, email, password, vehicle_type, vehicle_number, license_number, district, taluk, profile_image, dl_document_url, rc_document_url, aadhaar_document_url, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
       `;
-            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type || null, vehicle_number || null, license_number || null, profile_image, dl_document_url, rc_document_url, aadhaar_document_url], (err, result) => {
+            db_1.default.query(sql, [name, phone, email, hashedPassword, vehicle_type, vehicle_number, license_number, district, taluk, profile_image, dl_document_url, rc_document_url, aadhaar_document_url], (err, result) => {
                 if (err) {
                     console.error("❌ Transport Partner Signup DB Error:", err);
                     return res.status(500).json({ success: false, message: `Signup failed: ${err.message}` });
@@ -97,11 +93,11 @@ const loginTransportPartner = (req, res) => {
         const isMatch = await bcryptjs_1.default.compare(password, partner.password);
         if (!isMatch)
             return res.status(401).json({ success: false, message: "Invalid credentials" });
-        // ✅ Enforce approval status
-        if (partner.status !== "approved") {
+        // ✅ Enforce approval status - Allow 'pending' to login so they can see the pending dashboard
+        if (partner.status === "rejected") {
             return res.status(403).json({
                 success: false,
-                message: "Waiting for admin approval",
+                message: "Your application has been rejected. Please contact support.",
                 status: partner.status
             });
         }
@@ -128,6 +124,14 @@ const getDriverBookings = (req, res) => {
     const statusFilter = req.query.status
         ? String(req.query.status).toUpperCase()
         : null;
+    // Parsed coordinates to protect from malformed request parameters
+    const rawLat = req.query.lat;
+    const rawLng = req.query.lng;
+    const driverLat = rawLat !== undefined ? parseFloat(String(rawLat)) : 10.938354;
+    const driverLng = rawLng !== undefined ? parseFloat(String(rawLng)) : 78.418579;
+    const cleanLat = isNaN(driverLat) ? 10.938354 : driverLat;
+    const cleanLng = isNaN(driverLng) ? 78.418579 : driverLng;
+    console.log(`📡 [DriverBookings] Driver #${partnerId} requesting bookings around coordinate payload: [${cleanLat}, ${cleanLng}]`);
     const checkLockoutSql = `SELECT wallet_balance, commission_due_since FROM transport_partners WHERE id = ?`;
     db_1.default.query(checkLockoutSql, [partnerId], (lockErr, partnerResults) => {
         if (lockErr)
@@ -162,6 +166,8 @@ const getDriverBookings = (req, res) => {
         tb.\`distance km\` AS distance_km,
         tb.charge_amount,
         tb.status,
+        tb.payment_method,
+        tb.payment_status,
         tb.notes,
         tb.\`created at\` AS created_at,
         tb.vehicle_type,
@@ -205,27 +211,29 @@ const getMyActiveRide = (req, res) => {
     if (!driverId)
         return res.status(401).json({ success: false, message: "Driver not authenticated" });
     const sql = `
-    SELECT
-      tb.id,
-      tb.\`user id\` AS user_id,
-      tb.customer_name,
-      tb.customer_phone,
-      tb.from_address,
-      tb.\`from lat\` AS from_lat,
-      tb.from_Ing AS from_lng,
-      tb.\`to address\` AS to_address,
-      tb.\`to lat\` AS to_lat,
-      tb.\`to Ing\` AS to_lng,
-      tb.\`distance km\` AS distance_km,
-      tb.charge_amount,
-      tb.status,
-      tb.ride_status,
-      tb.notes,
-      tb.\`created at\` AS created_at,
-      tb.vehicle_type
-    FROM transport_bookings tb
-    WHERE tb.driver_id = ? AND tb.ride_status IN ('ACCEPTED', 'STARTED') AND tb.status != 'COMPLETED'
-    ORDER BY tb.id DESC LIMIT 1
+      SELECT
+        tb.id,
+        tb.\`user id\` AS user_id,
+        tb.customer_name,
+        tb.customer_phone,
+        tb.from_address,
+        tb.\`from lat\` AS from_lat,
+        tb.from_Ing AS from_lng,
+        tb.\`to address\` AS to_address,
+        tb.\`to lat\` AS to_lat,
+        tb.\`to Ing\` AS to_lng,
+        tb.\`distance km\` AS distance_km,
+        tb.charge_amount,
+        tb.status,
+        tb.ride_status,
+        tb.payment_method,
+        tb.payment_status,
+        tb.notes,
+        tb.\`created at\` AS created_at,
+        tb.vehicle_type
+      FROM transport_bookings tb
+      WHERE tb.driver_id = ? AND tb.ride_status IN ('ACCEPTED', 'STARTED') AND tb.status != 'COMPLETED'
+      ORDER BY tb.id DESC LIMIT 1
   `;
     db_1.default.query(sql, [driverId], (err, rows) => {
         if (err)
@@ -240,94 +248,221 @@ exports.getMyActiveRide = getMyActiveRide;
 ====================================================== */
 const acceptRide = (req, res) => {
     const rideId = Number(req.params.rideId);
-    const driverId = req.user?.id; // Logged-in driver ID from verified token payload
+    const driverId = req.user?.id;
+    console.log("Accept Ride Request");
+    console.log({
+        rideId,
+        driverId,
+        body: req.body
+    });
     if (!rideId || !driverId) {
-        return res.status(400).json({ success: false, message: "Invalid request parameters" });
+        return res.status(400).json({
+            success: false,
+            message: "Invalid request parameters. rideId and driverId are required."
+        });
     }
-    // 1. Ensure the ride is still unassigned ('BOOKED') to prevent double booking race-conditions
-    const selectBookingSql = "SELECT * FROM `transport_bookings` WHERE id = ? AND `ride_status` = 'BOOKED'";
-    db_1.default.query(selectBookingSql, [rideId], (err, bookings) => {
-        if (err)
-            return res.status(500).json({ success: false, error: err.message });
-        if (bookings.length === 0) {
-            return res.status(400).json({ success: false, message: "Ride has already been accepted or is unavailable." });
-        }
-        const activeBooking = bookings[0];
-        // 2. Query the transport_partners table to fetch this specific driver's Name, Phone, and Vehicle Type 🎯
-        const selectDriverSql = "SELECT name, phone, vehicle_type FROM `transport_partners` WHERE id = ?";
-        db_1.default.query(selectDriverSql, [driverId], (dErr, drivers) => {
-            if (dErr || drivers.length === 0) {
-                return res.status(500).json({ success: false, message: "Failed to resolve driver credentials." });
-            }
-            const driverProfile = drivers[0];
-            const driverName = driverProfile.name;
-            const driverPhone = driverProfile.phone;
-            const driverVehicle = String(driverProfile.vehicle_type || "").toLowerCase().trim();
-            const requestedVehicle = String(activeBooking.vehicle_type || "").toLowerCase().trim();
-            // 🎯 CRITICAL SECURITY GATEWAY: Enforce case-insensitive fleet matching validation
-            if (driverVehicle && requestedVehicle && driverVehicle !== requestedVehicle) {
-                console.warn(`🚨 Security Violation Blocked: Driver #${driverId} (${driverVehicle}) attempted to take a ${requestedVehicle} order.`);
-                return res.status(403).json({
+    // Scope variables to make them available in rollback callbacks
+    let driverName = "Driver";
+    let driverPhone = "";
+    try {
+        db_1.default.getConnection((connErr, connection) => {
+            if (connErr) {
+                console.error("❌ Failed to obtain database connection for transaction:", connErr);
+                return res.status(500).json({
                     success: false,
-                    message: `Mismatched Vehicle Type! You drive an ${driverVehicle.toUpperCase()}, but this is a ${requestedVehicle.toUpperCase()} order.`
+                    message: "Database connection failed",
+                    error: connErr.message
                 });
             }
-            // 3. Atomically assign the driver and advance status states cleanly
-            // Note: we set both driver_id and `driver id` because previous columns might be named ambiguously
-            const updateBookingSql = `
-        UPDATE \`transport_bookings\` 
-        SET \`ride_status\` = 'ACCEPTED', \`status\` = 'CONFIRMED', driver_id = ?, \`driver id\` = ? 
-        WHERE id = ?
-      `;
-            db_1.default.query(updateBookingSql, [driverId, driverId, rideId], (upErr) => {
-                if (upErr) {
-                    // Fallback if `driver id` column doesn't exist (some databases have just driver_id)
-                    const fallbackSql = `UPDATE \`transport_bookings\` SET \`ride_status\` = 'ACCEPTED', \`status\` = 'CONFIRMED', driver_id = ? WHERE id = ?`;
-                    db_1.default.query(fallbackSql, [driverId, rideId], (retryErr) => {
-                        if (retryErr)
-                            return res.status(500).json({ success: false, error: retryErr.message });
-                        finalizeAcceptance();
+            console.log(`[Tx Started] Starting transaction for Ride ID: ${rideId}, Driver ID: ${driverId}`);
+            connection.beginTransaction((txErr) => {
+                if (txErr) {
+                    connection.release();
+                    console.error("❌ Failed to start transaction:", txErr);
+                    return res.status(500).json({
+                        success: false,
+                        message: "Failed to start transaction",
+                        error: txErr.message
                     });
                 }
-                else {
-                    finalizeAcceptance();
-                }
-                function finalizeAcceptance() {
-                    // 4. Look up the destination customer email to send out the localized confirmation alert
-                    db_1.default.query("SELECT email FROM `users` WHERE id = ?", [activeBooking["user id"]], (uErr, users) => {
-                        if (!uErr && users.length > 0) {
-                            const customerEmail = users[0].email;
-                            // Build the clean custom message body containing the driver data points 🎯
-                            const dispatchAlertText = `🚖 Your VillageMart ride #${rideId} is confirmed! Driver Name: ${driverName}, Driver Mobile No: ${driverPhone}. Your driver is currently heading to your pickup location.`;
-                            // A. Trigger backend Nodemailer mailer instance
-                            const mailOptions = {
-                                from: process.env.EMAIL_USER || "noreply@villagemart.com",
-                                to: customerEmail,
-                                subject: `VillageMart Ride Confirmed - Booking #${rideId}`,
-                                text: dispatchAlertText
-                            };
-                            mailer_1.transporter.sendMail(mailOptions).catch((mErr) => {
-                                console.error("❌ Failed to dispatch booking email:", mErr.message);
-                            });
-                            // B. Inject a live tracking data row inside the user notification logs table
-                            const insertNotificationSql = "INSERT INTO `notifications` (`user id`, message, `is read`) VALUES (?, ?, 0)";
-                            db_1.default.query(insertNotificationSql, [activeBooking["user id"], dispatchAlertText], (nErr) => {
-                                if (nErr)
-                                    console.error("❌ Notification table sync failure:", nErr.message);
-                            });
+                // Helper function to rollback and return error response
+                const rollbackAndFail = (message, reason, statusCode = 500) => {
+                    console.log(`[Tx Rolled Back] Rolling back transaction. Reason: ${message} (${reason})`);
+                    connection.rollback(() => {
+                        connection.release();
+                        return res.status(statusCode).json({
+                            success: false,
+                            message,
+                            reason
+                        });
+                    });
+                };
+                // 1. Validate driver exists, is approved, is not blocked, and is online
+                const driverQuery = `
+          SELECT id, name, phone, vehicle_type, vehicle_number, status, account_status, \`is active\` AS is_active 
+          FROM transport_partners 
+          WHERE id = ?
+        `;
+                console.log(`[SQL Query] ${driverQuery} | Params: [${driverId}]`);
+                connection.query(driverQuery, [driverId], (dErr, drivers) => {
+                    if (dErr) {
+                        console.error("❌ Database query error fetching driver details:", dErr);
+                        return rollbackAndFail("Failed to resolve driver credentials", dErr.message);
+                    }
+                    if (!drivers || drivers.length === 0) {
+                        return rollbackAndFail("Driver not found", "No driver profile exists with the logged-in ID", 404);
+                    }
+                    const driver = drivers[0];
+                    driverName = driver.name;
+                    driverPhone = driver.phone;
+                    // Driver Validation Checks
+                    if (driver.status !== "approved") {
+                        return rollbackAndFail("Driver account not approved", `Approval status is: ${driver.status}`, 403);
+                    }
+                    if (driver.account_status === "BLOCKED") {
+                        return rollbackAndFail("Driver blocked", "Your account is blocked due to outstanding platform commissions", 403);
+                    }
+                    if (Number(driver.is_active) !== 1) {
+                        return rollbackAndFail("Driver offline", "You must go online to accept rides", 400);
+                    }
+                    // 2. Lock and validate the ride row
+                    const rideQuery = `
+            SELECT id, status, ride_status, driver_id, vehicle_type, \`user id\` AS user_id 
+            FROM transport_bookings 
+            WHERE id = ? 
+            FOR UPDATE
+          `;
+                    console.log(`[SQL Query] ${rideQuery} | Params: [${rideId}]`);
+                    connection.query(rideQuery, [rideId], (rErr, bookings) => {
+                        if (rErr) {
+                            console.error("❌ Database query error locking booking details:", rErr);
+                            return rollbackAndFail("Failed to lock booking row", rErr.message);
                         }
+                        if (!bookings || bookings.length === 0) {
+                            return rollbackAndFail("Ride not found", `No ride booking exists with ID: ${rideId}`, 404);
+                        }
+                        const ride = bookings[0];
+                        // Ride Validation Checks
+                        if (ride.ride_status !== "BOOKED") {
+                            return rollbackAndFail("Ride already accepted", `Ride is already in '${ride.ride_status}' status`, 400);
+                        }
+                        if (ride.driver_id !== null && ride.driver_id !== undefined) {
+                            return rollbackAndFail("Ride already has an assigned driver", `Assigned driver ID is: ${ride.driver_id}`, 400);
+                        }
+                        // Case-insensitive Vehicle matching validation
+                        const driverVehicle = String(driver.vehicle_type || "").toLowerCase().trim();
+                        const rideVehicle = String(ride.vehicle_type || "").toLowerCase().trim();
+                        if (driverVehicle !== rideVehicle) {
+                            return rollbackAndFail("Mismatched vehicle type", `You drive a ${driver.vehicle_type.toUpperCase()}, but this is a ${ride.vehicle_type.toUpperCase()} booking.`, 403);
+                        }
+                        // 3. Atomically assign the driver and advance status states cleanly
+                        const updateQuery = `
+              UPDATE transport_bookings 
+              SET driver_id = ?, ride_status = 'ACCEPTED', status = 'ACCEPTED', driver_accepted_at = NOW() 
+              WHERE id = ?
+            `;
+                        console.log(`[SQL Query] ${updateQuery} | Params: [${driverId}, ${rideId}]`);
+                        connection.query(updateQuery, [driverId, rideId], (uErr, updateResult) => {
+                            if (uErr) {
+                                console.error("❌ Database update error assigning driver to booking:", uErr);
+                                return rollbackAndFail("Failed to update booking status", uErr.message);
+                            }
+                            console.log(`[SQL Success] Affected rows: ${updateResult.affectedRows}`);
+                            // 4. Commit the transaction
+                            connection.commit((cErr) => {
+                                if (cErr) {
+                                    console.error("❌ Transaction commit error:", cErr);
+                                    return rollbackAndFail("Transaction commit failed", cErr.message);
+                                }
+                                console.log(`[Tx Committed] Ride #${rideId} successfully accepted by Driver #${driverId}`);
+                                connection.release();
+                                // 5. Post-Commit Actions (Notifications, Emails)
+                                // Any failures here must NOT fail the HTTP response or rollback the ride acceptance!
+                                triggerPostCommitActions(rideId, driverId, driver, ride);
+                                // Return success response to the client
+                                return res.status(200).json({
+                                    success: true,
+                                    message: "Ride accepted",
+                                    ride: {
+                                        id: rideId,
+                                        driver_id: driverId,
+                                        ride_status: "ACCEPTED",
+                                        status: "ACCEPTED"
+                                    }
+                                });
+                            });
+                        });
                     });
-                    return res.status(200).json({
-                        success: true,
-                        message: "Ride manual assignment and matching system updated successfully!",
-                        driver: { name: driverName, phone: driverPhone }
+                });
+            });
+        });
+    }
+    catch (err) {
+        console.error("❌ Unhandled acceptRide exception:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Ride acceptance failed",
+            error: err.message,
+            stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+        });
+    }
+};
+exports.acceptRide = acceptRide;
+// Post-Commit Hooks (Email, Push, Notifications) executed asynchronously to prevent blocking response
+function triggerPostCommitActions(rideId, driverId, driver, ride) {
+    const customerId = ride.user_id;
+    db_1.default.query("SELECT email FROM users WHERE id = ?", [customerId], (uErr, users) => {
+        if (uErr) {
+            console.error("❌ Notification lookup error - Failed to fetch customer email:", uErr);
+            return;
+        }
+        const customerEmail = users && users.length > 0 ? users[0].email : null;
+        const driverName = driver.name;
+        const driverPhone = driver.phone;
+        const dispatchAlertText = `🚖 Your VillageSmart ride #${rideId} is confirmed! Driver Name: ${driverName}, Driver Mobile No: ${driverPhone}. Your driver is currently heading to your pickup location.`;
+        // A. Send email notification (failsafe with idempotency)
+        if (customerEmail) {
+            db_1.default.query("INSERT IGNORE INTO transport_email_logs (ride_id, email_type) VALUES (?, ?)", [rideId, 'RIDE_ACCEPTED'], (iErr, iRes) => {
+                if (!iErr && iRes && iRes.affectedRows > 0) {
+                    (0, mailer_1.sendTransportDriverAssignedMail)({
+                        to: customerEmail,
+                        bookingId: rideId,
+                        driverName: driverName,
+                        driverMobile: driverPhone,
+                        vehicleType: ride.vehicle_type || driver.vehicle_type || "N/A",
+                        vehicleNumber: driver.vehicle_number || "N/A",
+                        eta: "Arriving shortly",
+                    }).then(() => {
+                        console.log(`📧 Ride Accepted email successfully sent to ${customerEmail}`);
+                    }).catch((mErr) => {
+                        console.error("❌ Email failed:", mErr.message || mErr);
                     });
                 }
             });
-        });
+        }
+        else {
+            console.log(`⚠️ No email address found for customer #${customerId}, skipping email dispatch.`);
+        }
+        // B. Inject user notification database entry (failsafe)
+        (0, notification_utils_1.createAndSendNotification)(customerId, "CUSTOMER", "🚖 Ride Accepted", dispatchAlertText, { type: "TRANSPORT_ACCEPTED", entityType: "transport", bookingId: String(rideId),
+            route: "/?app=consumer/transport", channelId: "villagesmart_rides", priority: "high" });
+        // C. Socket Emit for real-time notification (failsafe)
+        try {
+            server_1.io.to(`user_${customerId}`).emit("ride_accepted", {
+                bookingId: rideId,
+                driverName,
+                driverMobile: driverPhone,
+                vehicleNumber: driver.vehicle_number || "N/A",
+                vehicleType: ride.vehicle_type,
+                message: "Your ride booking has been accepted by a partner!"
+            });
+            console.log(`📡 Emitted ride_accepted socket notification to user_${customerId}`);
+        }
+        catch (sockErr) {
+            console.error("❌ Socket emit failed:", sockErr.message || sockErr);
+        }
     });
-};
-exports.acceptRide = acceptRide;
+}
 /* ======================================================
    🚗 UPDATE RIDE STATUS
    PUT /api/transport-driver/status/:rideId
@@ -357,7 +492,7 @@ const updateRideStatus = (req, res) => {
             message: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
         });
     }
-    db_1.default.query("SELECT tb.status, tb.ride_status, tb.`user id`, tb.customer_name, u.email FROM transport_bookings tb JOIN users u ON u.id = tb.`user id` WHERE tb.id = ? LIMIT 1", [rideId], (err, rows) => {
+    db_1.default.query("SELECT tb.status, tb.ride_status, tb.`user id`, tb.customer_name, tb.driver_id, tb.charge_amount, tb.from_address, tb.`to address` as to_address, tb.vehicle_type, tb.`distance km` as distance_km, u.email FROM transport_bookings tb JOIN users u ON u.id = tb.`user id` WHERE tb.id = ? LIMIT 1", [rideId], (err, rows) => {
         if (err || !rows?.length) {
             return res.status(404).json({ success: false, message: "Ride not found" });
         }
@@ -369,20 +504,43 @@ const updateRideStatus = (req, res) => {
                 message: `Invalid transition from ${current}. Ride must be STARTED to complete.`,
             });
         }
-        db_1.default.query("UPDATE transport_bookings SET status = 'COMPLETED', ride_status = 'COMPLETED' WHERE id = ?", [rideId], (updateErr) => {
+        db_1.default.query("UPDATE transport_bookings SET status = 'COMPLETED', ride_status = 'COMPLETED', ride_completed_at = NOW() WHERE id = ?", [rideId], (updateErr) => {
             if (updateErr) {
                 console.error("❌ updateRideStatus error:", updateErr);
                 return res.status(500).json({ success: false, message: "Failed to update status" });
             }
             // 🔔 Notify customer: ride completed
-            (0, exports.triggerOrderNotification)(rows[0]["user id"], `🏁 Transport ride #${rideId} → COMPLETED. Thanks for riding with VillageMart!`);
+            (0, notification_utils_1.createAndSendNotification)(rows[0]["user id"], "CUSTOMER", "🏁 Ride Completed", `Your ride #${rideId} is complete. Thank you for riding with VillageSmart!`, { type: "TRANSPORT_COMPLETED", entityType: "transport", bookingId: String(rideId),
+                route: "/?app=consumer/transport", channelId: "villagesmart_rides" });
+            const driverId = rows[0].driver_id;
+            const chargeAmount = parseFloat(rows[0].charge_amount || 0);
+            const commissionOwed = chargeAmount * 0.10;
+            if (driverId && commissionOwed > 0) {
+                (0, commissionGuard_1.triggerCommissionWindow)(driverId, 'transport', commissionOwed);
+            }
             if (rows[0].email) {
-                mailer_1.transporter.sendMail({
-                    from: process.env.EMAIL_USER,
-                    to: rows[0].email,
-                    subject: "Thank You for Riding with VillageMart!",
-                    text: `Hello ${rows[0].customer_name},\n\nYour journey is complete. Thank you for using VillageMart Ride! We look forward to traveling with you again soon.`
-                }).catch(e => console.error("Email error:", e));
+                // Need driver name for invoice
+                db_1.default.query("SELECT name FROM transport_partners WHERE id = ?", [rows[0].driver_id], (dErr, dRows) => {
+                    const dName = (dRows && dRows.length > 0) ? dRows[0].name : "Driver";
+                    db_1.default.query("INSERT IGNORE INTO transport_email_logs (ride_id, email_type) VALUES (?, ?)", [rideId, 'RIDE_COMPLETED'], (iErr, iRes) => {
+                        if (!iErr && iRes && iRes.affectedRows > 0) {
+                            (0, mailer_1.sendRideBookingInvoiceMail)({
+                                to: rows[0].email,
+                                customerName: rows[0].customer_name,
+                                bookingId: rideId,
+                                fromAddress: rows[0].from_address || "N/A",
+                                toAddress: rows[0].to_address || "N/A",
+                                distanceKm: rows[0].distance_km || 0,
+                                vehicleType: rows[0].vehicle_type || "N/A",
+                                driverName: dName,
+                                chargeAmount: parseFloat(rows[0].charge_amount || 0),
+                                paymentMethod: rows[0].payment_method || "Cash / Online"
+                            }).then(() => {
+                                console.log(`📧 Ride Completed invoice sent to ${rows[0].email}`);
+                            }).catch(e => console.error("❌ Failed to send ride complete email:", e));
+                        }
+                    });
+                });
             }
             return res.json({
                 success: true,
@@ -393,6 +551,46 @@ const updateRideStatus = (req, res) => {
     });
 };
 exports.updateRideStatus = updateRideStatus;
+/* ======================================================
+   💵 MARK CASH COLLECTED
+   POST /api/transport-driver/rides/:rideId/cash-collected
+====================================================== */
+const markCashCollected = (req, res) => {
+    const driverId = req.user?.id;
+    const { rideId } = req.params;
+    if (!rideId) {
+        return res.status(400).json({ success: false, message: "Ride ID is required" });
+    }
+    // Verify the ride belongs to this driver and is a pending cash ride
+    db_1.default.query("SELECT payment_method, payment_status, ride_status FROM transport_bookings WHERE id = ? AND driver_id = ?", [rideId, driverId], (err, rows) => {
+        if (err) {
+            console.error("❌ SQL Error verifying cash ride:", err);
+            return res.status(500).json({ success: false, message: "Database error" });
+        }
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Ride not found or unauthorized." });
+        }
+        const ride = rows[0];
+        if (ride.payment_method !== "CASH") {
+            return res.status(400).json({ success: false, message: "This ride is not marked for cash collection." });
+        }
+        if (ride.payment_status === "PAID") {
+            return res.status(400).json({ success: false, message: "Cash has already been collected." });
+        }
+        // Atomically update the payment status
+        db_1.default.query("UPDATE transport_bookings SET payment_status = 'PAID', cash_collected_at = NOW(), cash_collected_by = ? WHERE id = ?", [driverId, rideId], (updateErr) => {
+            if (updateErr) {
+                console.error("❌ SQL Error updating cash status:", updateErr);
+                return res.status(500).json({ success: false, message: "Failed to update cash status." });
+            }
+            return res.json({
+                success: true,
+                message: "Cash payment confirmed successfully.",
+            });
+        });
+    });
+};
+exports.markCashCollected = markCashCollected;
 /* ======================================================
    🚗 VERIFY RIDE OTP & START RIDE
    POST /api/transport-driver/verify-otp
@@ -410,17 +608,17 @@ const verifyRideOtp = (req, res) => {
     if (String(otp).length !== 4) {
         return res.status(400).json({ success: false, message: "OTP must be exactly 4 digits" });
     }
-    db_1.default.query("SELECT ride_otp, ride_status, status, `user id` FROM transport_bookings WHERE id = ? LIMIT 1", [Number(rideId)], (err, rows) => {
+    db_1.default.query("SELECT tb.ride_otp, tb.ride_status, tb.status, tb.`user id`, u.email FROM transport_bookings tb JOIN users u ON u.id = tb.`user id` WHERE tb.id = ? LIMIT 1", [Number(rideId)], (err, rows) => {
         if (err || !rows?.length) {
             return res.status(404).json({ success: false, message: "Ride not found" });
         }
         const ride = rows[0];
         const currentStatus = (ride.status || "").toUpperCase();
-        // Ensure ride is in CONFIRMED state (accepted by driver, not yet started)
-        if (currentStatus !== "CONFIRMED") {
+        // Ensure ride is in ACCEPTED or CONFIRMED state (accepted by driver, not yet started)
+        if (currentStatus !== "CONFIRMED" && currentStatus !== "ACCEPTED") {
             return res.status(409).json({
                 success: false,
-                message: `Ride is in ${currentStatus} state. OTP verification only allowed for CONFIRMED rides.`,
+                message: `Ride is in ${currentStatus} state. OTP verification only allowed for ACCEPTED/CONFIRMED rides.`,
             });
         }
         // 🔐 CRITICAL: Validate the 4-digit OTP against the stored ride_otp
@@ -439,13 +637,15 @@ const verifyRideOtp = (req, res) => {
             });
         }
         // ✅ OTP matches — transition CONFIRMED → STARTED (sync both status columns)
-        db_1.default.query("UPDATE transport_bookings SET status = 'STARTED', ride_status = 'STARTED' WHERE id = ?", [Number(rideId)], (updateErr) => {
+        db_1.default.query("UPDATE transport_bookings SET status = 'STARTED', ride_status = 'STARTED', ride_started_at = NOW() WHERE id = ?", [Number(rideId)], (updateErr) => {
             if (updateErr) {
                 console.error("❌ verifyRideOtp update error:", updateErr);
                 return res.status(500).json({ success: false, message: "Failed to start ride" });
             }
             // 🔔 Notify customer: ride has started
-            db_1.default.query("INSERT INTO notifications (`user id`, message, `is read`) VALUES (?, ?, 0)", [ride["user id"], `🚗 Your ride #${rideId} has started! OTP verified successfully.`]);
+            (0, notification_utils_1.createAndSendNotification)(ride["user id"], "CUSTOMER", "🚗 Ride Started", `Your ride #${rideId} has started! OTP verified successfully.`, { type: "TRANSPORT_STARTED", entityType: "transport", bookingId: String(rideId),
+                route: "/?app=consumer/transport", channelId: "villagesmart_rides" });
+            // Removed sendTransportRideStartedMail as per new business rule
             return res.json({ success: true, message: "OTP Verified! Ride started." });
         });
     });
@@ -485,38 +685,60 @@ const getDriverEarnings = (req, res) => {
     if (!driverId) {
         return res.status(401).json({ success: false, message: "Driver not authenticated", data: [] });
     }
-    // ✅ FIXED: Filter by driver_id to only show this driver's rides
-    const sql = `
-    SELECT id, \`distance km\` AS distance_km, charge_amount, status, \`created at\` AS created_at
-    FROM transport_bookings
-    WHERE driver_id = ? AND status IN ('CONFIRMED', 'STARTED', 'COMPLETED')
-    ORDER BY \`created at\` DESC
-  `;
-    db_1.default.query(sql, [driverId], (err, rows) => {
-        if (err) {
-            console.error("❌ getDriverEarnings error:", err);
-            return res.status(500).json({ success: false, message: "Failed to fetch earnings", data: [] });
+    // Retrieve transport partner wallet and commission data
+    db_1.default.query("SELECT wallet_balance, pending_commission, commission_deadline, commission_due_since FROM transport_partners WHERE id = ?", [driverId], (profileErr, profileRows) => {
+        if (profileErr) {
+            console.error("❌ getDriverEarnings profile fetch error:", profileErr);
+            return res.status(500).json({ success: false, message: "Failed to fetch driver profile data", data: [] });
         }
-        const all = (rows || []);
-        // 🚩 BUSINESS LOGIC: 10% Platform Commission
-        // Driver gets 90%
-        const COMMISSION_RATE = 0.9;
-        const totalEarnings = all.reduce((s, r) => s + (Number(r.charge_amount || 0) * COMMISSION_RATE), 0);
-        const totalRides = all.length;
-        const totalDistance = all.reduce((s, r) => s + Number(r.distance_km || 0), 0);
-        const today = new Date().toDateString();
-        const todayRides = all.filter((r) => new Date(r.created_at).toDateString() === today);
-        const todayEarnings = todayRides.reduce((s, r) => s + (Number(r.charge_amount || 0) * COMMISSION_RATE), 0);
-        return res.json({
-            success: true,
-            data: {
+        const profile = profileRows && profileRows.length > 0
+            ? profileRows[0]
+            : { wallet_balance: 0.00, pending_commission: 0.00, commission_deadline: null, commission_due_since: null };
+        // Filter by driver_id to only show this driver's rides
+        const sql = `
+      SELECT id, \`distance km\` AS distance_km, charge_amount, status, \`created at\` AS created_at
+      FROM transport_bookings
+      WHERE driver_id = ? AND status IN ('CONFIRMED', 'STARTED', 'COMPLETED')
+      ORDER BY \`created at\` DESC
+    `;
+        db_1.default.query(sql, [driverId], (err, rows) => {
+            if (err) {
+                console.error("❌ getDriverEarnings bookings error:", err);
+                return res.status(500).json({ success: false, message: "Failed to fetch earnings", data: [] });
+            }
+            const all = (rows || []);
+            // 🚩 BUSINESS LOGIC: 10% Platform Commission
+            // Driver gets 90%
+            const COMMISSION_RATE = 0.9;
+            const totalEarnings = all.reduce((s, r) => s + (Number(r.charge_amount || 0) * COMMISSION_RATE), 0);
+            const totalRides = all.length;
+            const totalDistance = all.reduce((s, r) => s + Number(r.distance_km || 0), 0);
+            const today = new Date().toDateString();
+            const todayRides = all.filter((r) => new Date(r.created_at).toDateString() === today);
+            const todayEarnings = todayRides.reduce((s, r) => s + (Number(r.charge_amount || 0) * COMMISSION_RATE), 0);
+            // Eliminate dynamic calculations on fetch. Return true database column values directly.
+            const responseData = {
                 totalEarnings: Number(totalEarnings.toFixed(2)),
                 totalRides,
                 totalDistance: Number(totalDistance.toFixed(2)),
                 todayEarnings: Number(todayEarnings.toFixed(2)),
                 todayRides: todayRides.length,
                 rides: all,
-            },
+                wallet_balance: profile.wallet_balance,
+                pending_commission: parseFloat(profile.pending_commission),
+                commission_deadline: profile.commission_deadline,
+                commission_due_since: profile.commission_due_since,
+                // Direct DB column mapping equivalents
+                netEarnings: Number(totalEarnings.toFixed(2)),
+                grossFare: all.reduce((s, r) => s + Number(r.charge_amount || 0), 0),
+                pendingCommission: parseFloat(profile.pending_commission),
+                walletBalance: profile.wallet_balance,
+                totalDeliveries: totalRides
+            };
+            return res.json({
+                success: true,
+                data: responseData,
+            });
         });
     });
 };
@@ -531,11 +753,27 @@ const toggleTransportOnline = (req, res) => {
     if (typeof is_online !== 'boolean') {
         return res.status(400).json({ success: false, message: "is_online (boolean) required" });
     }
-    db_1.default.query("UPDATE transport_partners SET `is active` = ? WHERE id = ?", [is_online ? 1 : 0, driverId], (err) => {
-        if (err)
-            return res.status(500).json({ success: false, message: "Status update failed" });
-        res.json({ success: true, message: `Status updated to ${is_online ? 'online' : 'offline'}` });
-    });
+    if (is_online) {
+        db_1.default.query("SELECT status FROM transport_partners WHERE id = ?", [driverId], (err, rows) => {
+            if (err)
+                return res.status(500).json({ success: false, message: "Database error" });
+            if (rows.length === 0 || rows[0].status !== 'approved') {
+                return res.status(403).json({ success: false, message: "You must be approved to go online" });
+            }
+            db_1.default.query("UPDATE transport_partners SET `is active` = 1 WHERE id = ?", [driverId], (updateErr) => {
+                if (updateErr)
+                    return res.status(500).json({ success: false, message: "Status update failed" });
+                res.json({ success: true, message: "Status updated to online" });
+            });
+        });
+    }
+    else {
+        db_1.default.query("UPDATE transport_partners SET `is active` = 0 WHERE id = ?", [driverId], (err) => {
+            if (err)
+                return res.status(500).json({ success: false, message: "Status update failed" });
+            res.json({ success: true, message: "Status updated to offline" });
+        });
+    }
 };
 exports.toggleTransportOnline = toggleTransportOnline;
 /* ======================================================
@@ -571,9 +809,53 @@ const autoAssignNearestDriver = (bookingId, fromLat, fromLng) => {
             if (!updateErr) {
                 console.log(`✅ Ride #${bookingId} auto-assigned to Driver #${driverId}`);
                 // Notify driver
-                db_1.default.query("INSERT INTO notifications (`user id`, message) VALUES (?, ?)", [driverId, `🚖 New Ride Request #${bookingId} assigned to you!`]);
+                db_1.default.query("INSERT INTO notifications (`user id`, message) VALUES (?, ?)", [driverId, `🚖 New Ride Request #${bookingId} has been assigned to you!`]);
             }
         });
     });
 };
 exports.autoAssignNearestDriver = autoAssignNearestDriver;
+/* ======================================================
+   🚗 GET DRIVER TRIPS
+   GET /api/transport-driver/trips
+====================================================== */
+const getDriverTrips = (req, res) => {
+    const driverId = req.user?.id;
+    if (!driverId) {
+        return res.status(401).json({ success: false, message: "Driver not authenticated" });
+    }
+    const sql = `
+    SELECT
+      tb.id,
+      tb.\`user id\` AS user_id,
+      tb.customer_name,
+      tb.customer_phone,
+      tb.from_address,
+      tb.\`from lat\` AS from_lat,
+      tb.from_Ing AS from_lng,
+      tb.\`to address\` AS to_address,
+      tb.\`to lat\` AS to_lat,
+      tb.\`to Ing\` AS to_lng,
+      tb.\`distance km\` AS distance_km,
+      tb.charge_amount,
+      tb.status,
+      tb.ride_status,
+      tb.notes,
+      tb.\`created at\` AS created_at,
+      tb.vehicle_type
+    FROM transport_bookings tb
+    WHERE tb.driver_id = ? AND (
+      UPPER(tb.status) IN ('CONFIRMED', 'ASSIGNED', 'IN_PROGRESS', 'ARRIVED', 'COMPLETED', 'STARTED', 'CANCELLED')
+      OR UPPER(tb.ride_status) IN ('ACCEPTED', 'STARTED', 'COMPLETED')
+    )
+    ORDER BY tb.\`created at\` DESC
+  `;
+    db_1.default.query(sql, [driverId], (err, rows) => {
+        if (err) {
+            console.error("❌ getDriverTrips error:", err);
+            return res.status(500).json({ success: false, message: "Failed to fetch driver trips" });
+        }
+        return res.json({ success: true, data: rows || [] });
+    });
+};
+exports.getDriverTrips = getDriverTrips;

@@ -10,6 +10,7 @@ export interface AuthRequest extends Request {
     id: number;
     username: string;
     role: string;
+    permissions?: string[];
   };
 }
 
@@ -20,6 +21,7 @@ export const generateToken = (payload: {
   id: number;
   username: string;
   role: string;
+  permissions?: string[];
 }) => {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
 };
@@ -41,15 +43,51 @@ export const verifyToken = (req: any, res: any, next: any) => {
   jwt.verify(token, REUSABLE_DEV_SECRET, (err: any, decoded: any) => {
     if (err) {
       console.error("❌ JWT Verification failed payload error:", err.message);
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({ success: false, message: "Your session has expired. Please login again." });
+      }
       return res.status(401).json({ success: false, message: "Invalid or expired token payload" });
     }
     
     // Mount the authenticated parameters securely onto the Express request channel
-    req.user = { id: decoded.id, role: String(decoded.role).toUpperCase() };
+    req.user = { 
+      id: decoded.id, 
+      username: decoded.username || "",
+      role: String(decoded.role).toUpperCase(),
+      permissions: decoded.permissions || []
+    };
     
     // 🛡️ DYNAMIC BLOCK CHECK: Automatically terminate session if the partner was blocked
     checkPartnerSessionStatus(req, res, next);
   });
+};
+
+/* ======================================================
+   🛡️ ADMIN ACCESS CONTROL GATES (RBAC)
+====================================================== */
+export const checkAdminPermission = (moduleName: string) => {
+  return (req: any, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Access Denied: Admin role required" });
+    }
+    // Super Admin (ID 1, or ID 0, or username Mohan) bypasses permissions checks
+    if (req.user.id === 1 || req.user.id === 0 || req.user.username === "Mohan") {
+      return next();
+    }
+
+    const perms = req.user.permissions || [];
+    if (perms.includes(moduleName)) {
+      return next();
+    }
+
+    return res.status(403).json({ 
+      success: false, 
+      message: `Access Denied: You do not have permission to view ${moduleName.charAt(0).toUpperCase() + moduleName.slice(1)}.` 
+    });
+  };
 };
 
 /* ======================================================

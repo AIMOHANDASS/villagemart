@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import db from "../db";
-import { sendPartyHallBookingConfirmMail, transporter } from "../utils/mailer";
+import { sendPartyHallBookingConfirmMail, sendPartyHallBookingInvoiceMail, transporter } from "../utils/mailer";
 
 const PARTY_HALL_BASE_CHARGE = 700;
 const PARTY_HALL_DURATION_HOURS = 3;
@@ -109,7 +109,23 @@ export const createPartyHallBooking = (req: Request, res: Response) => {
     return res.status(400).json({ message: "Invalid party hall booking data" });
   }
 
-  const totalPersons = Number(personCount || 0);
+  // 1. Verify global settings state in DB
+  db.query(
+    "SELECT setting_value FROM system_settings WHERE setting_key = 'party_hall_service_available'",
+    (settingErr: any, settings: any[]) => {
+      if (settingErr) {
+        console.error("❌ Failed to verify global setting:", settingErr);
+        return res.status(500).json({ success: false, message: "Server error verifying reservation status." });
+      }
+
+      if (settings && settings.length > 0 && settings[0].setting_value === "false") {
+        return res.status(403).json({
+          success: false,
+          message: "Party Hall reservations are currently paused by administration.",
+        });
+      }
+
+      const totalPersons = Number(personCount || 0);
   if (!Number.isFinite(totalPersons) || totalPersons <= 0) {
     return res.status(400).json({ message: "Person count must be greater than 0" });
   }
@@ -187,6 +203,26 @@ export const createPartyHallBooking = (req: Request, res: Response) => {
           `🏛 Party hall booked on ${eventDate} ${startTime}-${endTime}. Clarification: ${SUPPORT_NUMBER}`,
         ]);
 
+        // 📧 Send E-commerce Receipt Invoice Email to the user immediately
+        db.query("SELECT email, name FROM users WHERE id = ?", [Number(userId)], (uErr: any, uRows: any[]) => {
+          if (!uErr && uRows && uRows.length > 0) {
+            const userEmail = uRows[0].email;
+            const userName = uRows[0].name || customerName;
+            sendPartyHallBookingInvoiceMail({
+              to: userEmail,
+              username: userName,
+              bookingId: result.insertId,
+              eventDate: eventDate,
+              startTime: startTime,
+              endTime: endTime,
+              personCount: totalPersons,
+              baseCharge: PARTY_HALL_BASE_CHARGE,
+              addOnCharge: addOnCharge,
+              totalCharge: totalCharge,
+            }).catch(mailErr => console.error("❌ Failed to send party hall booking invoice email:", mailErr));
+          }
+        });
+
         return res.json({
           success: true,
           bookingId: result.insertId,
@@ -200,6 +236,7 @@ export const createPartyHallBooking = (req: Request, res: Response) => {
         });
       }
     );
+  });
   });
 };
 
@@ -370,5 +407,17 @@ export const confirmPartyHallBooking = (req: Request, res: Response) => {
         return res.json({ success: true });
       }
     );
+  });
+};
+
+export const getPartyHallServiceStatus = (req: Request, res: Response) => {
+  const sql = "SELECT setting_value FROM system_settings WHERE setting_key = 'party_hall_service_available' LIMIT 1";
+  db.query(sql, (err: any, rows: any[]) => {
+    if (err) {
+      console.error("❌ getPartyHallServiceStatus error:", err);
+      return res.status(500).json({ available: true }); // Default to true on error
+    }
+    const isAvailable = rows && rows.length > 0 ? (rows[0].setting_value === "true" || rows[0].setting_value === "1") : true;
+    return res.status(200).json({ available: isAvailable });
   });
 };
