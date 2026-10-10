@@ -18,15 +18,23 @@ jobs:
           - app-name: consumer-app
             vite-target: client
             apk-name: villagemart-client.apk
+            app-id: com.villagemartapp.in
+            manifest-type: customer
           - app-name: admin-app
             vite-target: admin
             apk-name: villagemart-admin.apk
+            app-id: com.villagemart.app
+            manifest-type: partner
           - app-name: delivery-app
             vite-target: delivery
             apk-name: villagemart-delivery.apk
+            app-id: com.villagemart.deliverypartner
+            manifest-type: partner
           - app-name: transport-app
             vite-target: transport
             apk-name: villagemart-transport.apk
+            app-id: com.villagemart.transportpartner
+            manifest-type: partner
 
     steps:
       - name: Checkout Repository
@@ -51,11 +59,22 @@ jobs:
         working-directory: ./frontend
         run: npm run build:${{ matrix.vite-target }}
 
-      - name: Update Capacitor Target Directory
+      - name: Backup Configuration Files
         working-directory: ./frontend
         run: |
-          # Dynamically update capacitor.config.ts to point to the correct dist output
+          cp capacitor.config.ts capacitor.config.ts.bak
+          cp android/app/build.gradle android/app/build.gradle.bak
+          cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.bak
+
+      - name: Inject Target Configuration
+        working-directory: ./frontend
+        run: |
+          # Dynamically update capacitor.config.ts and build.gradle for the matrix target
           sed -i "s|webDir: '.*'|webDir: 'dist/${{ matrix.vite-target }}'|g" capacitor.config.ts
+          sed -i "s|appId: '.*'|appId: '${{ matrix.app-id }}'|g" capacitor.config.ts
+          sed -i "s|applicationId \".*\"|applicationId \"${{ matrix.app-id }}\"|g" android/app/build.gradle
+          # Apply the target-specific AndroidManifest
+          cp android/manifests/AndroidManifest-${{ matrix.manifest-type }}.xml android/app/src/main/AndroidManifest.xml
 
       - name: Capacitor Native Sync
         working-directory: ./frontend
@@ -95,3 +114,40 @@ jobs:
           name: ${{ matrix.apk-name }}
           path: ./frontend/android/app/build/outputs/apk/debug/${{ matrix.apk-name }}
           retention-days: 7
+
+      - name: Decode Android Keystore
+        working-directory: ./frontend/android
+        run: echo "${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+
+      - name: Build Release AAB
+        working-directory: ./frontend/android
+        env:
+          ANDROID_UPLOAD_KEYSTORE_FILE: ${{ github.workspace }}/frontend/android/keystore.jks
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease
+
+      - name: Rename AAB Artifact
+        working-directory: ./frontend/android/app/build/outputs/bundle/release
+        run: |
+          apk_name="${{ matrix.apk-name }}"
+          aab_name="${apk_name%.apk}.aab"
+          mv app-release.aab "$aab_name"
+          echo "AAB_NAME=$aab_name" >> $GITHUB_ENV
+
+      - name: Upload AAB to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aab-${{ env.AAB_NAME }}
+          path: ./frontend/android/app/build/outputs/bundle/release/${{ env.AAB_NAME }}
+          retention-days: 7
+
+      - name: Restore Configuration Files & Cleanup
+        if: always()
+        working-directory: ./frontend
+        run: |
+          mv capacitor.config.ts.bak capacitor.config.ts || true
+          mv android/app/build.gradle.bak android/app/build.gradle || true
+          mv android/app/src/main/AndroidManifest.xml.bak android/app/src/main/AndroidManifest.xml || true
+          rm -f android/keystore.jks

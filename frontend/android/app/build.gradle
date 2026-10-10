@@ -1,13 +1,13 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.villagemart.app"
+    namespace = "com.villagemartapp.in"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.villagemart.app"
+        applicationId "com.villagemartapp.in"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 45
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -16,32 +16,46 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (System.getenv("ANDROID_UPLOAD_KEYSTORE_FILE")) {
+                storeFile file(System.getenv("ANDROID_UPLOAD_KEYSTORE_FILE"))
+                storePassword System.getenv("ANDROID_UPLOAD_STORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_UPLOAD_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (System.getenv("ANDROID_UPLOAD_KEYSTORE_FILE")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
 
-repositories {
-    flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
-    }
-}
+// Local repositories for JAR/AAR files (if any)
+
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // Play Integrity API for Native Firebase Phone Auth Attestation
+    implementation "com.google.android.play:integrity:1.4.0"
+    implementation "com.google.firebase:firebase-appcheck-playintegrity:18.0.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    // AdMob SDK
+    implementation 'com.google.android.gms:play-services-ads:23.0.0'
     implementation project(':capacitor-cordova-android-plugins')
 }
 
 apply from: 'capacitor.build.gradle'
-
 apply plugin: 'com.google.gms.google-services'
